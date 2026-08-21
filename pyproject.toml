@@ -76,7 +76,7 @@ persistence = [
 migrations = [
     "alembic>=1.14.0",
     # build_alembic_config() sets sqlalchemy.url from sync_dsn (postgresql+psycopg).
-    "psycopg[binary]>=3.2.0",
+    "psycopg[binary]>=3.3.4",
 ]
 cache = [
     "redis>=5.0.0",
