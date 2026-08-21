@@ -61,7 +61,7 @@ grpc = [
 ]
 runtime = [
     "fastapi>=0.115.0",
-    "uvicorn[standard]>=0.34.0",
+    "uvicorn[standard]>=0.52.3",
     "python-multipart>=0.0.20",
     "grpcio>=1.71.0",
 ]
