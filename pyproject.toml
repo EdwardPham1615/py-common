@@ -66,7 +66,7 @@ runtime = [
     "grpcio>=1.71.0",
 ]
 persistence = [
-    "sqlalchemy[asyncio]>=2.0.40",
+    "sqlalchemy[asyncio]>=2.0.52",
     # DatabaseSettings.async_dsn hardcodes postgresql+asyncpg, so the extra that
     # provides the engine factory has to provide the driver it names. Without
     # this, create_engine_and_sessionmaker() raises ModuleNotFoundError at the
