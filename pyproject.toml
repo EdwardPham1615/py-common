@@ -15,29 +15,29 @@ classifiers = [
 license = "MIT"
 license-files = ["LICENSE"]
 dependencies = [
-    "pydantic>=2.11.0",
-    "pydantic-settings>=2.9.0",
+    "pydantic>=2.13.5",
+    "pydantic-settings>=2.15.0",
     # Already pulled in by pydantic-settings, but pycommon imports it directly
     # to read ENVIRONMENT out of .env before choosing which env files to load.
-    "python-dotenv>=1.0.0",
+    "python-dotenv>=1.2.3",
     "structlog>=25.3.0",
     "ecs-logging>=2.2.0",
     "opentelemetry-api>=1.34.0",
-    "anyio>=4.0.0",
+    "anyio>=4.15.1",
     "tenacity>=9.0.0",
 ]
 
 [project.optional-dependencies]
 http = [
-    "fastapi>=0.115.0",
-    "starlette>=0.46.0",
+    "fastapi>=0.141.1",
+    "starlette>=1.6.0",
     "httpx>=0.28.0",
 ]
 storage = [
     "aioboto3>=14.0.0",
 ]
 security = [
-    "fastapi>=0.115.0",
+    "fastapi>=0.141.1",
     "httpx>=0.28.0",
     "PyJWT[crypto]>=2.10.0",
 ]
@@ -52,18 +52,18 @@ telemetry = [
     "opentelemetry-instrumentation-httpx>=0.55b0",
     "opentelemetry-instrumentation-asgi>=0.55b0",
     "opentelemetry-instrumentation-grpc>=0.55b0",
-    "fastapi>=0.115.0",
+    "fastapi>=0.141.1",
     "opentelemetry-exporter-prometheus>=0.55b0",
 ]
 grpc = [
-    "grpcio>=1.71.0",
+    "grpcio>=1.83.1",
     "opentelemetry-instrumentation-grpc>=0.55b0",
 ]
 runtime = [
-    "fastapi>=0.115.0",
+    "fastapi>=0.141.1",
     "uvicorn[standard]>=0.52.3",
     "python-multipart>=0.0.20",
-    "grpcio>=1.71.0",
+    "grpcio>=1.83.1",
 ]
 persistence = [
     "sqlalchemy[asyncio]>=2.0.52",
@@ -74,12 +74,12 @@ persistence = [
     "asyncpg>=0.30.0",
 ]
 migrations = [
-    "alembic>=1.14.0",
+    "alembic>=1.19.2",
     # build_alembic_config() sets sqlalchemy.url from sync_dsn (postgresql+psycopg).
     "psycopg[binary]>=3.3.4",
 ]
 cache = [
-    "redis>=5.0.0",
+    "redis>=8.1.0",
 ]
 profiling = [
     "fastapi_profiler>=1.5.0",
@@ -88,16 +88,16 @@ all = [
     "pycommon[http,storage,security,telemetry,grpc,runtime,persistence,migrations,cache,profiling]",
 ]
 dev = [
-    "ruff>=0.12.0",
-    "mypy>=1.16.0",
+    "ruff>=0.16.6",
+    "mypy>=2.3.1",
     "pytest>=8.4.0",
     "pytest-asyncio>=1.0.0",
     "pytest-cov>=6.0.0",
-    "pre-commit>=4.2.0",
+    "pre-commit>=4.6.2",
     "aiosqlite>=0.21.0",
     "fakeredis[lua]>=2.37.0",
     # Starlette TestClient prefers httpx2 (StarletteDeprecationWarning otherwise).
-    "httpx2>=0.1.0",
+    "httpx2>=2.12.0",
 ]
 
 [build-system]
