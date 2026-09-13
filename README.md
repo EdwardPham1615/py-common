@@ -92,6 +92,30 @@ the settings claim another.
 ENVIRONMENT=production   # exported, or in .env — either works
 ```
 
+[`.env.example`](.env.example) is the full reference: every setting this
+library reads, with its real default and a note on the ones whose default is
+wrong outside a laptop. Copy it into a service and uncomment what you change:
+
+```bash
+cp .env.example .env
+```
+
+Every key is live and set to the value pycommon already uses, so a fresh copy
+changes nothing — it starts the service exactly as an empty `.env` would, and a
+test keeps that true. Eight keys are commented out instead: those are the
+settings whose default is *off*, and no value expresses that — an empty number
+fails to parse and an empty string is a different thing from unset. Each shows
+an example of the shape it wants. Two things the file spells out that cost
+people an afternoon otherwise: nested keys follow the **field name your
+service declares** (`postgres: DatabaseSettings` is what makes the prefix
+`POSTGRES__`, and only `http` and `server` exist without you declaring them),
+and list values must be JSON — `CORS_ORIGINS=a,b` raises `SettingsError` at
+start-up, `CORS_ORIGINS=["a","b"]` is the form.
+
+A test walks the settings classes and the file in both directions, so a setting
+added without documenting it — or a key left behind after one is removed —
+fails CI rather than a consuming service.
+
 ## Middleware configuration
 
 Everything that differs between deployments is a setting, not a function
