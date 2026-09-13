@@ -5,12 +5,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 `pycommon` is a shared platform library (config, logging, telemetry, security,
-storage, HTTP helpers, runtime, persistence, cache, utils) consumed by
-multiple internal FastAPI services via a pinned git tag. It is *not* an
-application — there is no domain logic here, and a change ships to every
-consumer at once. Keep that in mind for anything beyond a pure bugfix: prefer
-additive changes (new optional parameters, new modules) over breaking ones,
-and see "Governance" in README.md before changing any public signature.
+storage, HTTP helpers, runtime, persistence, cache, utils) for internal FastAPI
+services, installed by pinning a git tag. It is *not* an application — there is
+no domain logic here.
+
+**Current state: `v0.1.0` shipped 2026-09-13 and no service consumes it yet.**
+That is worth knowing before weighing a breaking change, and worth correcting
+here the moment it stops being true — it is the difference between a rename
+costing one PR and a rename costing somebody an outage. Once services do pin a
+tag, a change ships to all of them at once: prefer additive changes (new
+optional parameters, new modules) over breaking ones, and see "Governance" in
+README.md before changing any public signature.
 
 ## Commands
 
@@ -22,7 +27,10 @@ make format           # ruff format (writes)
 make typecheck        # mypy --strict on src/pycommon
 make test             # pytest
 make test-cov         # pytest with coverage (fails under 85%, see pyproject.toml)
-make test-integration # tests/integration against real Redis/Postgres — see below
+make infra-up         # docker compose: Redis, Postgres, Jaeger, MinIO (waits until healthy)
+make test-integration-local  # infra-up, then the integration suite with the right env
+make infra-down       # stop them and delete the data
+make test-integration # tests/integration when the env vars are already set — see below
 make audit            # pip-audit against the locked, exported dependency set
 make pre-commit       # install + run pre-commit hooks
 ```
@@ -90,8 +98,8 @@ Each subpackage under `src/pycommon/` maps to an optional dependency extra in
 `pyproject.toml` (`http`, `storage`, `security`, `telemetry`, `grpc`,
 `runtime`, `persistence`, `migrations`, `cache`, `profiling`; `all` pulls in
 everything, `dev` is tooling only). Only `pydantic`/`pydantic-settings`/
-`structlog`/`ecs-logging`/`opentelemetry-api`/`anyio`/`tenacity` are always
-installed. **Import optional-dependency modules only inside the code path
+`python-dotenv`/`structlog`/`ecs-logging`/`opentelemetry-api`/`anyio`/
+`tenacity` are always installed. **Import optional-dependency modules only inside the code path
 that needs them** — a consumer installing `pycommon[http]` must not be forced
 to have `aioboto3` or `grpcio` importable. This is the load-bearing
 constraint behind the module boundaries; when adding a feature, put it in the
@@ -102,7 +110,7 @@ without gating it behind an extra.
 
 | Module | Responsibility |
 |--------|----------------|
-| `config` | `BaseAppSettings`; nested DB/Redis/Keycloak/OTel/S3/`ProfilerSettings` via `POSTGRES__HOST`-style env keys |
+| `config` | `BaseAppSettings` with `http`/`server`/`cors` built in; DB/Redis/Keycloak/OTel/S3/`ProfilerSettings` declared per service, via `POSTGRES__HOST`-style env keys. All 77 keys are written down in `.env.example`, which tests hold to the settings classes in both directions |
 | `logging` | ECS JSON via `structlog` + `ecs-logging`, correlated with OTel trace/span IDs |
 | `telemetry` | OTel bootstrap (traces + metrics), instrumentors, shutdown/flush, opt-in `enable_profiler` |
 | `errors` | `ErrorCode` + `AppError` factories → RFC 9457 Problem Details |
@@ -148,6 +156,14 @@ inconsistent:
   (via `apply_standard_middleware`) so that even a 500 raised in Starlette's
   outer `ServerErrorMiddleware` still carries `X-Request-ID` and CORS
   headers.
+- **Everything configuring the HTTP surface is under `HTTP__` or `CORS__`.**
+  There are no exceptions left: CORS became a group and
+  `PROBLEM_TYPE_BASE_URL` moved into `HttpSettings`. The unprefixed keys are
+  the genuinely app-level ones — `ENVIRONMENT`, `APP_NAME`, `APP_VERSION`,
+  `DEBUG`, `LOG_LEVEL`. This matters more than tidiness: `model_config` sets
+  `extra="ignore"`, so a key in the wrong shape is dropped **in silence** and
+  the setting keeps its default. Check `.env.example` rather than guessing a
+  spelling.
 - **Settings, not function arguments, for anything environment-dependent**
   (middleware toggles, pool sizing, body limits) — an operator changes
   behavior via env vars without a code release.
@@ -199,6 +215,28 @@ code, so treat these as closed unless something new contradicts them:
   for it. A service that needs to cap concurrent work can do it at its own
   edge or its ingress.
 
+- **Log lines carry one name per fact.** `ecs_logging` derives `log.level` from
+  the method name and supplies `@timestamp` itself, so `add_log_level` and a
+  plain `timestamp` key put a second copy of both on every line. The JSON path
+  therefore omits them and stamps straight into `@timestamp`; the console path
+  keeps them, because `ConsoleRenderer` builds its prefix from exactly those
+  two keys and loses the level entirely without them. Adding them back to the
+  shared chain restores the duplication.
+
+- **Gzip sits outside idempotency and inside metrics.** `IdempotencyMiddleware`
+  stores a response and replays it for a repeated key; a compressed body in
+  that store would be replayed to a client that never sent
+  `Accept-Encoding: gzip`. Inside the metrics and request-context layers so
+  compression time lands in the latency you alert on, and outside the timeout,
+  which is a ceiling on the handler rather than on serialising its result.
+
+- **Published tags are immutable, and the two deletions in the 0.1.0 history
+  were a one-off.** `v0.2.0` was deleted and the changelog renumbered so the
+  first release would be the first release, and `v0.1.0` was re-tagged once to
+  include the runtime tests. Both happened while nothing consumed the library.
+  The rule in RELEASING.md stands as written: from `v0.1.0` onward, a tag is
+  never moved or deleted — fix a bad release by publishing the next one.
+
 - **`CelerySettings`/`MongoSettings` were deleted, not implemented.** They
   had been exported with no module using them. Don't re-add settings ahead of
   the code that consumes them.
@@ -210,9 +248,9 @@ code, so treat these as closed unless something new contradicts them:
   docstring (`persistence/unit_of_work.py:13-14`) states the limitation it
   would close — cross-engine coordination is out of scope, and callers are told
   to document that until a saga/outbox exists.
-- Coverage sits around 87% against an 85% floor, so there is roughly two
-  points of headroom — a sizeable untested addition will fail `make test-cov`
-  on the floor, not just look untidy.
+- Coverage sits at ~91.7% against an 85% floor. Every module is above 90% and
+  eight are at 100%, so a large untested addition now stands out in the diff
+  long before it reaches the floor.
 
 ## Repo conventions (from CONTRIBUTING.md)
 
