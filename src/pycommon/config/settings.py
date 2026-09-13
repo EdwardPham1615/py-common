@@ -31,7 +31,7 @@ from pycommon.config.environment import (
 
 
 class HttpSettings(BaseModel):
-    """Middleware knobs — env keys ``HTTP__TIMEOUT_SECONDS``, ``HTTP__HSTS``, etc.
+    """HTTP-layer knobs — env keys ``HTTP__TIMEOUT_SECONDS``, ``HTTP__HSTS``, etc.
 
     These are the values that differ between one deployment and the next, which
     is what makes them settings rather than arguments: a timeout that suits
@@ -71,6 +71,16 @@ class HttpSettings(BaseModel):
     # generally assume; long enough to cover a retry after an outage, short
     # enough that the store does not accumulate every write forever.
     idempotency_ttl_seconds: int = 24 * 60 * 60
+
+    # Prefix for RFC 9457 problem ``type`` URIs
+    # (e.g. https://docs.example.com/problems). Unset emits path-absolute types
+    # like ``/problems/input``, which are valid but resolve to nothing.
+    #
+    # Passed to register_exception_handlers rather than read by the middleware,
+    # so it is the one value here the stack does not consume itself. It lives
+    # with the rest of the HTTP surface because that is where someone looks for
+    # it, not because a middleware reads it.
+    problem_type_base_url: str | None = None
 
 
 class CorsSettings(BaseModel):
@@ -139,10 +149,6 @@ class BaseAppSettings(BaseSettings):
     server: ServerSettings = Field(default_factory=ServerSettings)
 
     cors: CorsSettings = Field(default_factory=CorsSettings)
-
-    # Prefix for RFC 9457 Problem Details ``type`` URIs (e.g. https://docs.example.com/problems).
-    # When unset, handlers emit path-absolute types like ``/problems/input``.
-    problem_type_base_url: str | None = None
 
     def __init__(self, **kwargs: Any) -> None:
         resolved: Environment | None = None

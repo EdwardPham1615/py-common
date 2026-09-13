@@ -378,11 +378,11 @@ app = create_base_app(
     ),
     is_dev=settings.is_dev,
 )
-register_exception_handlers(app, problem_type_base_url=settings.problem_type_base_url)
+register_exception_handlers(app, problem_type_base_url=settings.http.problem_type_base_url)
 apply_standard_middleware(app, settings)
 enable_profiler(app, settings.profiler, environment=settings.environment.value)
 app.include_router(build_health_router([]))
-app.include_router(build_problem_types_router(problem_type_base_url=settings.problem_type_base_url))
+app.include_router(build_problem_types_router(problem_type_base_url=settings.http.problem_type_base_url))
 
 if __name__ == "__main__":
     run_uvicorn("main:app", reload=True)
