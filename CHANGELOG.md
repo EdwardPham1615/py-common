@@ -8,6 +8,8 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-13
+
 ### Fixed
 
 - **A gRPC request ID leaked into every later call on the same context.**
