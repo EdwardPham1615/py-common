@@ -193,6 +193,12 @@ code, so treat these as closed unless something new contradicts them:
   handler's lifetime. Binding in `intercept_service` again reintroduces the
   leak.
 
+- **Bulkhead / concurrency limiting is not wanted here.** It was considered
+  and dropped, not deferred: don't propose it as a gap, don't add a
+  `ConcurrencyLimitMiddleware`, and don't add a semaphore primitive to `utils`
+  for it. A service that needs to cap concurrent work can do it at its own
+  edge or its ingress.
+
 - **`CelerySettings`/`MongoSettings` were deleted, not implemented.** They
   had been exported with no module using them. Don't re-add settings ahead of
   the code that consumes them.
@@ -200,8 +206,7 @@ code, so treat these as closed unless something new contradicts them:
 ### Known gaps
 
 - Not implemented, and deliberately so far unclaimed: the transactional
-  outbox, bulkhead/concurrency limiting, feature flags, audit-log helpers,
-  Sentry integration. For the outbox, `UnitOfWork`'s
+  outbox, feature flags, audit-log helpers, Sentry integration. For the outbox, `UnitOfWork`'s
   docstring (`persistence/unit_of_work.py:13-14`) states the limitation it
   would close — cross-engine coordination is out of scope, and callers are told
   to document that until a saga/outbox exists.
