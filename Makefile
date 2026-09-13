@@ -1,4 +1,5 @@
-.PHONY: help install sync lint format format-check typecheck test test-cov test-integration audit check pre-commit clean
+.PHONY: help install sync lint format format-check typecheck test test-cov test-integration \
+	test-integration-local infra-up infra-down infra-logs audit check pre-commit clean
 
 UV ?= uv
 SRC := src
@@ -38,6 +39,30 @@ test-integration: ## Run integration tests against real Redis / Postgres (see CO
 		echo "See the Testing section of CONTRIBUTING.md for the two containers."; \
 		exit 1; }
 	$(UV) run pytest tests/integration -v --no-cov
+
+# The env every integration group reads, pointed at docker-compose.yaml. One
+# definition so a contributor never assembles this by hand, and so the ports and
+# credentials cannot drift from the compose file.
+INFRA_ENV := \
+	REDIS_TEST_URL=redis://localhost:6379/15 \
+	POSTGRES_TEST_DSN=postgresql+asyncpg://pycommon:pycommon@localhost:5432/pycommon_test \
+	OTLP_TEST_ENDPOINT=http://localhost:4317 \
+	JAEGER_QUERY_URL=http://localhost:16686 \
+	S3_TEST_ENDPOINT=http://localhost:9000 \
+	S3_TEST_ACCESS_KEY=pycommon \
+	S3_TEST_SECRET_KEY=pycommon123
+
+infra-up: ## Start Redis/Postgres/Jaeger/MinIO for the integration suite, wait until healthy
+	docker compose up -d --wait
+
+infra-down: ## Stop them and delete their data
+	docker compose down -v
+
+infra-logs: ## Tail the service logs
+	docker compose logs -f
+
+test-integration-local: infra-up ## infra-up, then run the integration suite against it
+	$(INFRA_ENV) $(UV) run pytest tests/integration -v --no-cov
 
 audit: ## Audit locked dependencies for known vulnerabilities
 	$(UV) export --frozen --extra all --no-dev --no-emit-project \

@@ -55,25 +55,25 @@ integration fixtures on that pattern.
 is unset — don't expect `make test-integration` to do anything without them:
 
 ```bash
-docker run -d --rm -p 6379:6379 redis:7-alpine
-docker run -d --rm -p 5432:5432 \
-  -e POSTGRES_USER=pycommon -e POSTGRES_PASSWORD=pycommon -e POSTGRES_DB=pycommon_test \
-  -e POSTGRES_INITDB_ARGS="--auth-host=scram-sha-256 --auth-local=scram-sha-256" \
-  postgres:17-alpine
-
-REDIS_TEST_URL=redis://localhost:6379/15 \
-POSTGRES_TEST_DSN=postgresql+asyncpg://pycommon:pycommon@localhost:5432/pycommon_test \
-  make test-integration
+make infra-up                 # Redis, Postgres, Jaeger, MinIO -- waits until healthy
+make test-integration-local   # runs tests/integration against them
+make infra-down               # stops them, deletes the data
 ```
 
-Telemetry and object-storage groups need their own containers
-(`OTLP_TEST_ENDPOINT`/`JAEGER_QUERY_URL` for Jaeger, `S3_TEST_ENDPOINT` for
-MinIO) — see the Testing section of CONTRIBUTING.md for the exact commands.
-Point these only at throwaway instances: the Redis fixture calls `FLUSHDB`
-and the Postgres one drops and recreates its tables. If you touch a Lua
-script, a TTL, the lock, the query logger, or anything about pooling, run
-this suite — the fake-backed unit suite proves the Python is coherent, not
-that it works against the real database/broker.
+`docker-compose.yaml` is the single definition of those services; the Makefile
+builds the env vars from the same values. To run one group alone, set only its
+variables and call `make test-integration`.
+
+Each group reads its own variables (`REDIS_TEST_URL`, `POSTGRES_TEST_DSN`,
+`OTLP_TEST_ENDPOINT`/`JAEGER_QUERY_URL`, `S3_TEST_ENDPOINT`) and skips when they
+are unset. Point them only at throwaway instances: the Redis fixture calls
+`FLUSHDB` and the Postgres one drops and recreates its tables. CI does not use
+the compose file — GitHub Actions starts its own service containers — so image
+tags there and in `docker-compose.yaml` have to be kept in step.
+
+If you touch a Lua script, a TTL, the lock, the query logger, or anything about
+pooling, run this suite — the fake-backed unit suite proves the Python is
+coherent, not that it works against the real database/broker.
 
 The unit test suite (`make test`) runs against `fakeredis` and `aiosqlite`
 instead, so it needs no running services. Know their gaps before trusting a
