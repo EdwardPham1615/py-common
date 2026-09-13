@@ -109,7 +109,7 @@ without gating it behind an extra.
 | `security` | Keycloak JWT/JWKS validation, RBAC deps, `client_credentials` token provider |
 | `storage` | S3-compatible `ObjectStorageClient` (`aioboto3`, long-lived client) |
 | `http` | Problem Details handlers + `/problems` docs, `ApiResponse` envelope, pagination, health, httpx client factory |
-| `http.middleware` | Request-ID/trace context, security headers, access log, RED metrics, `apply_standard_middleware`, rate-limit dependency |
+| `http.middleware` | Request-ID/trace context, security headers, access log, RED metrics, opt-in gzip, `apply_standard_middleware`, rate-limit dependency |
 | `cache` | Redis client factory, `Cache`/`@cached` (stampede-protected), distributed lock (auto-extend), fixed/sliding-window rate limiters |
 | `runtime` | FastAPI app shell, lifespan composer, gRPC server + client channel pool (request-id interceptors), uvicorn runner |
 | `persistence` | Engine/sessionmaker, structured query logging, `Base` + naming convention, thin Alembic helpers, `Repository`/`UnitOfWork` |
@@ -199,9 +199,9 @@ code, so treat these as closed unless something new contradicts them:
 
 ### Known gaps
 
-- Not implemented, and deliberately so far unclaimed: GZip/compression
-  middleware, the transactional outbox, bulkhead/concurrency limiting, feature
-  flags, audit-log helpers, Sentry integration. For the outbox, `UnitOfWork`'s
+- Not implemented, and deliberately so far unclaimed: the transactional
+  outbox, bulkhead/concurrency limiting, feature flags, audit-log helpers,
+  Sentry integration. For the outbox, `UnitOfWork`'s
   docstring (`persistence/unit_of_work.py:13-14`) states the limitation it
   would close — cross-engine coordination is out of scope, and callers are told
   to document that until a saga/outbox exists.

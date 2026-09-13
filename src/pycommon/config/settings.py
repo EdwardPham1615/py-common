@@ -60,6 +60,13 @@ class HttpSettings(BaseModel):
     # actually take; 1 MiB suits a JSON API.
     max_body_bytes: int | None = None
 
+    # Off by default: compression changes the bytes on the wire for every
+    # response a service already serves, and the win depends on what it serves
+    # -- JSON compresses well, an endpoint returning pre-compressed blobs gains
+    # nothing and pays the CPU anyway. 500-1000 suits a JSON API; below roughly
+    # a packet the gzip header costs more than it saves.
+    gzip_min_size: int | None = None
+
     # How long a replayable response is kept. A day matches what clients
     # generally assume; long enough to cover a retry after an outage, short
     # enough that the store does not accumulate every write forever.

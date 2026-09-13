@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 
 from pycommon.http.middleware.body_limit import (
     DEFAULT_MAX_BODY_BYTES,
@@ -66,9 +67,9 @@ def apply_standard_middleware(
     """Attach the standard middleware stack in the correct order.
 
     Outermost to innermost: CORS, security headers, metrics, request context
-    (request-ID + access log + unhandled-exception rendering).
-    Starlette treats the *last* added middleware as outermost, hence the
-    reversed add order below.
+    (request-ID + access log + unhandled-exception rendering), gzip, timeout,
+    body limit, idempotency. Starlette treats the *last* added middleware as
+    outermost, hence the reversed add order below.
 
     Request context must sit *inside* the other two: it renders unhandled
     exceptions itself (see :class:`RequestContextMiddleware`), and that response
@@ -81,7 +82,8 @@ def apply_standard_middleware(
 
     Everything that varies between deployments is read from ``settings.http``
     (``HTTP__TIMEOUT_SECONDS``, ``HTTP__CONTENT_SECURITY_POLICY``, ``HTTP__HSTS``,
-    ``HTTP__HSTS_MAX_AGE``, ``HTTP__MAX_BODY_BYTES``) the same way CORS already
+    ``HTTP__HSTS_MAX_AGE``, ``HTTP__MAX_BODY_BYTES``, ``HTTP__GZIP_MIN_SIZE``)
+    the same way CORS already
     is, so a value has exactly one source and an operator can change it without
     a code change. ``metrics``
     stays an argument because it is structural rather than
@@ -114,6 +116,25 @@ def apply_standard_middleware(
     # a 504) exactly like any other response.
     if settings.http.timeout_seconds is not None:
         app.add_middleware(TimeoutMiddleware, seconds=settings.http.timeout_seconds)
+
+    # Compression sits outside the timeout -- the deadline is a ceiling on the
+    # handler, not on serialising what it returned -- and outside idempotency,
+    # which is the boundary that matters: that middleware stores a response and
+    # replays it for a repeated key, so a compressed body in the store would be
+    # replayed verbatim to a client that never sent Accept-Encoding: gzip.
+    # Store the plain body, compress per request.
+    #
+    # It stays *inside* metrics and the request context so the time compression
+    # costs lands in http.server.request.duration and the access log, rather
+    # than hiding outside the numbers you alert on.
+    #
+    # Starlette's implementation, not ours: it already excludes
+    # text/event-stream and pre-compressed media types, sets Vary, and moves
+    # payloads over 128 KiB onto a worker thread so a large response cannot
+    # stall the event loop.
+    if settings.http.gzip_min_size is not None:
+        app.add_middleware(GZipMiddleware, minimum_size=settings.http.gzip_min_size)
+
     app.add_middleware(RequestContextMiddleware)
     if metrics:
         app.add_middleware(MetricsMiddleware)

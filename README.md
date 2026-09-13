@@ -105,6 +105,7 @@ groups are on `BaseAppSettings` itself, since every HTTP service needs them:
 | `HTTP__HSTS` | `true` | emit HSTS on HTTPS requests |
 | `HTTP__HSTS_MAX_AGE` | `31536000` | HSTS max-age |
 | `HTTP__MAX_BODY_BYTES` | unset | reject request bodies larger than this |
+| `HTTP__GZIP_MIN_SIZE` | unset | gzip responses at least this many bytes; unset installs no compression |
 | `HTTP__IDEMPOTENCY_TTL_SECONDS` | `86400` | how long a replayable response is kept |
 | `SERVER__HOST` / `SERVER__PORT` | `0.0.0.0` / `8000` | uvicorn bind |
 | `SERVER__FORWARDED_ALLOW_IPS` | unset | peers whose `X-Forwarded-*` to trust |
@@ -205,6 +206,42 @@ would rather set it from code.
 `API_CONTENT_SECURITY_POLICY` is `default-src 'none'; frame-ancestors 'none'`.
 If you serve interactive docs in production, exclude their path or widen the
 policy to permit their CDN.
+
+## Response compression
+
+Off unless asked for. `HTTP__GZIP_MIN_SIZE=500` installs Starlette's
+`GZipMiddleware`; unset, nothing is installed and responses go out exactly as
+they did before. Compression changes the bytes on the wire for every endpoint at
+once, which is not something a library should switch on for its consumers during
+an upgrade.
+
+It is Starlette's implementation rather than one of ours — it already excludes
+`text/event-stream` and pre-compressed media types (images, video, zip), sets
+`Vary: Accept-Encoding`, and moves payloads over 128 KiB onto a worker thread so
+a large response cannot stall the event loop.
+
+What this library decides is *where it sits*: inside the metrics and request
+context layers, outside the timeout and idempotency ones.
+
+- **Outside idempotency** is the one that would bite. `IdempotencyMiddleware`
+  stores a response and replays it for a repeated key; a compressed body in that
+  store would be replayed byte-for-byte to a client that never sent
+  `Accept-Encoding: gzip` and cannot decode it. The store holds the plain body
+  and each request is compressed on its own terms.
+- **Inside metrics and the access log**, so the time compression costs appears
+  in `http.server.request.duration` and `duration_ms` rather than hiding outside
+  the numbers you alert on.
+- **Outside the timeout**, because the deadline is a ceiling on the handler, not
+  on serialising what it returned.
+
+Two things worth checking before switching it on:
+
+- **Your ingress may already do it.** nginx, Envoy and ALB all compress on the
+  way out. Enabling it here as well spends CPU on work that gets thrown away.
+- **BREACH.** Compressing a response that mixes a secret (a CSRF token, an API
+  key) with attacker-influenced reflected input lets the compressed size leak
+  the secret. That is a reason to leave compression off for those specific
+  endpoints, not a reason to avoid it everywhere.
 
 ## Caching
 
