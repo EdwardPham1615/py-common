@@ -11,8 +11,10 @@ from pycommon.cache import (
     LockAcquireError,
     RedisRateLimiter,
     RedisSlidingWindowRateLimiter,
+    create_redis,
     redis_lock,
 )
+from pycommon.config import RedisSettings
 
 
 @pytest.fixture
@@ -293,3 +295,62 @@ def test_rate_limit_dep_requires_a_rate() -> None:
 
     with pytest.raises(ValueError, match="Pass a rate"):
         build_rate_limit_dep(InMemoryRateLimiter())
+
+
+# --- client factory -------------------------------------------------------
+
+
+def test_create_redis_applies_every_setting() -> None:
+    """The timeouts are the point of this factory.
+
+    redis-py blocks forever without ``socket_timeout`` and
+    ``socket_connect_timeout``, so a hung connection pins an event-loop task
+    instead of failing fast. Losing one of these would look like nothing at all
+    until a Redis node stopped answering mid-connection.
+    """
+    settings = RedisSettings(
+        url="redis://localhost:6379/3",
+        max_connections=7,
+        socket_timeout_seconds=1.5,
+        socket_connect_timeout_seconds=2.5,
+        health_check_interval_seconds=11,
+        retry_on_timeout=False,
+    )
+
+    client = create_redis(settings)
+    pool = client.connection_pool
+    kwargs = pool.connection_kwargs
+
+    assert pool.max_connections == 7
+    assert kwargs["socket_timeout"] == 1.5
+    assert kwargs["socket_connect_timeout"] == 2.5
+    assert kwargs["health_check_interval"] == 11
+    assert kwargs["retry_on_timeout"] is False
+    # Keepalive is not a setting: a pool behind a load balancer needs it either
+    # way, so it is applied unconditionally.
+    assert kwargs["socket_keepalive"] is True
+    # The database from the URL has to survive, or a service quietly reads and
+    # writes someone else's keyspace.
+    assert kwargs["db"] == 3
+    assert kwargs["decode_responses"] is True
+
+
+def test_create_redis_can_return_bytes() -> None:
+    """Anything storing pickled or compressed values needs the raw bytes."""
+    client = create_redis(RedisSettings(), decode_responses=False)
+
+    assert client.connection_pool.connection_kwargs["decode_responses"] is False
+
+
+def test_each_call_builds_its_own_pool() -> None:
+    """Documented behaviour, and the reason to build the client once per process.
+
+    Calling this per request would give every request its own pool and defeat
+    pooling entirely, which is a slow leak rather than an error.
+    """
+    settings = RedisSettings()
+
+    first = create_redis(settings)
+    second = create_redis(settings)
+
+    assert first.connection_pool is not second.connection_pool

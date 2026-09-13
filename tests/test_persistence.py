@@ -322,3 +322,22 @@ async def test_database_lifespan_resource_connects_then_disposes() -> None:
     # dispose() replaces the pool rather than poisoning the engine; a new pool
     # object is the observable proof the old connections were returned.
     assert engine.pool is not pool_before
+
+
+def test_alembic_helpers_name_the_extra_when_alembic_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``pycommon[persistence]`` does not install Alembic; ``[migrations]`` does.
+
+    A bare ``ModuleNotFoundError: alembic`` leaves the reader guessing which
+    extra they missed, so the guard says it.
+    """
+    import sys
+
+    from pycommon.config import DatabaseSettings
+    from pycommon.persistence import build_alembic_config
+
+    monkeypatch.setitem(sys.modules, "alembic.config", None)
+
+    with pytest.raises(ImportError, match=r"pycommon\[migrations\]"):
+        build_alembic_config(DatabaseSettings())
