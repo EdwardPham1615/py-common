@@ -80,15 +80,14 @@ def apply_standard_middleware(
     :func:`~pycommon.telemetry.metrics.setup_metrics` installs a provider, so
     leaving it on costs nothing in a service that exports no metrics.
 
-    Everything that varies between deployments is read from ``settings.http``
-    (``HTTP__TIMEOUT_SECONDS``, ``HTTP__CONTENT_SECURITY_POLICY``, ``HTTP__HSTS``,
-    ``HTTP__HSTS_MAX_AGE``, ``HTTP__MAX_BODY_BYTES``, ``HTTP__GZIP_MIN_SIZE``)
-    the same way CORS already
-    is, so a value has exactly one source and an operator can change it without
-    a code change. ``metrics``
-    stays an argument because it is structural rather than
-    environment-specific — whether this service records HTTP metrics at all,
-    not what its ceiling should be.
+    Everything that varies between deployments is read from settings —
+    ``settings.http`` (``HTTP__TIMEOUT_SECONDS``, ``HTTP__CONTENT_SECURITY_POLICY``,
+    ``HTTP__HSTS``, ``HTTP__HSTS_MAX_AGE``, ``HTTP__MAX_BODY_BYTES``,
+    ``HTTP__GZIP_MIN_SIZE``) and ``settings.cors`` (``CORS__ORIGINS`` and
+    friends) — so a value has exactly one source and an operator can change it
+    without a code change. ``metrics`` stays an argument because it is
+    structural rather than environment-specific: whether this service records
+    HTTP metrics at all, not what its ceiling should be.
 
     ``redis`` installs :class:`IdempotencyMiddleware`. It is an argument rather
     than a setting because it is a live connection, not a value; its TTL comes
@@ -146,8 +145,8 @@ def apply_standard_middleware(
     )
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origins,
-        allow_credentials=settings.cors_allow_credentials,
-        allow_methods=settings.cors_allow_methods,
-        allow_headers=settings.cors_allow_headers,
+        allow_origins=settings.cors.origins,
+        allow_credentials=settings.cors.allow_credentials,
+        allow_methods=settings.cors.allow_methods,
+        allow_headers=settings.cors.allow_headers,
     )

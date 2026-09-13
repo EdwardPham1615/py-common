@@ -73,6 +73,21 @@ class HttpSettings(BaseModel):
     idempotency_ttl_seconds: int = 24 * 60 * 60
 
 
+class CorsSettings(BaseModel):
+    """Browser CORS policy — env keys ``CORS__ORIGINS``, ``CORS__ALLOW_METHODS``, etc.
+
+    A group rather than four flat fields, because this is configuration for the
+    same middleware stack ``HTTP__*`` configures, and there is no reason for one
+    to carry a prefix while the other does not.
+    """
+
+    # A frontend dev server, which is what makes this wrong everywhere else.
+    origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
+    allow_credentials: bool = True
+    allow_methods: list[str] = Field(default_factory=lambda: ["*"])
+    allow_headers: list[str] = Field(default_factory=lambda: ["*"])
+
+
 class ServerSettings(BaseModel):
     """Process/uvicorn knobs — env keys ``SERVER__PORT``, ``SERVER__DRAIN_DELAY_SECONDS``, etc."""
 
@@ -123,10 +138,7 @@ class BaseAppSettings(BaseSettings):
     http: HttpSettings = Field(default_factory=HttpSettings)
     server: ServerSettings = Field(default_factory=ServerSettings)
 
-    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
-    cors_allow_credentials: bool = True
-    cors_allow_methods: list[str] = Field(default_factory=lambda: ["*"])
-    cors_allow_headers: list[str] = Field(default_factory=lambda: ["*"])
+    cors: CorsSettings = Field(default_factory=CorsSettings)
 
     # Prefix for RFC 9457 Problem Details ``type`` URIs (e.g. https://docs.example.com/problems).
     # When unset, handlers emit path-absolute types like ``/problems/input``.
