@@ -131,7 +131,7 @@ Object storage needs an S3-compatible server:
 ```bash
 docker run -d --rm -p 9000:9000 \
   -e MINIO_ROOT_USER=pycommon -e MINIO_ROOT_PASSWORD=pycommon123 \
-  minio/minio:latest server /data
+  quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
 
 S3_TEST_ENDPOINT=http://localhost:9000 make test-integration
 ```

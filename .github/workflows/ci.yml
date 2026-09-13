@@ -90,11 +90,16 @@ jobs:
       # Not a service container: those cannot pass a command, and the MinIO
       # image needs `server /data`. Started as a step instead, published on the
       # runner where the tests already run.
+      #
+      # Pulled from quay.io, not Docker Hub: `docker.io/minio/minio` now answers
+      # anonymous pulls with `pull access denied`, which failed this step -- and
+      # with it every test -- on an unrelated commit. Pinned to a release rather
+      # than `latest` so the image cannot change underneath a green run.
       - name: Start MinIO
         run: |
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER=pycommon -e MINIO_ROOT_PASSWORD=pycommon123 \
-            minio/minio:latest server /data
+            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
           for _ in $(seq 1 30); do
             curl -sf http://localhost:9000/minio/health/live >/dev/null && exit 0
             sleep 1
