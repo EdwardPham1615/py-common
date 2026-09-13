@@ -8,10 +8,10 @@ Reusable platform library for FastAPI (and related) Python services: config, log
 
 ```bash
 # uv
-uv add "pycommon[all] @ git+https://github.com/EdwardPham1615/pycommon.git@v0.1.0"
+uv add "pycommon[all] @ git+https://github.com/EdwardPham1615/pycommon.git@v0.2.0"
 
 # pip
-pip install "pycommon[all] @ git+https://github.com/EdwardPham1615/pycommon.git@v0.1.0"
+pip install "pycommon[all] @ git+https://github.com/EdwardPham1615/pycommon.git@v0.2.0"
 ```
 
 Pin a tag or commit SHA for reproducible builds.
@@ -45,7 +45,7 @@ Core always installs: `pydantic`, `pydantic-settings`, `structlog`, `ecs-logging
 | `all` | Everything above |
 | `dev` | ruff, mypy, pytest, pre-commit, aiosqlite, fakeredis |
 
-Example: `uv add "pycommon[http,persistence,runtime] @ git+https://github.com/EdwardPham1615/pycommon.git@v0.1.0"`
+Example: `uv add "pycommon[http,persistence,runtime] @ git+https://github.com/EdwardPham1615/pycommon.git@v0.2.0"`
 
 ## Modules
 
@@ -630,7 +630,7 @@ stmt = select(User).where(User.is_active())
 This library is shared by multiple services, so a change here ships to all of them at once:
 
 - **Backward compatibility first.** Breaking a public API requires a version bump and a migration note. Prefer additive changes (new parameters with defaults, new modules).
-- **Semantic versioning.** Consumers pin a tag (`@v0.1.0`); never re-tag. While the major version is `0`, SemVer permits a *minor* bump to break compatibility — the migration note is what makes that safe, not the version number. See [RELEASING.md](RELEASING.md).
+- **Semantic versioning.** Consumers pin a tag (`@v0.2.0`); never re-tag. While the major version is `0`, SemVer permits a *minor* bump to break compatibility — the migration note is what makes that safe, not the version number. See [RELEASING.md](RELEASING.md).
 - **No domain logic.** Business entities, service-specific constants, or third-party partner integrations belong in the owning service, not here.
 - **No silent failures.** Infrastructure setup errors must be logged or raised, never swallowed.
 
