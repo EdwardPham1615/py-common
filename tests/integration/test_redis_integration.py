@@ -14,8 +14,10 @@ from pycommon.cache import (
     LockAcquireError,
     RedisRateLimiter,
     RedisSlidingWindowRateLimiter,
+    create_redis,
     redis_lock,
 )
+from pycommon.config import RedisSettings
 
 pytestmark = pytest.mark.integration
 
@@ -288,3 +290,39 @@ async def test_concurrent_keys_collapse_to_one_run_on_real_redis(redis_client: R
 
     assert len(calls) == 1
     assert sum(1 for r in results if r.status_code == 409) == 4
+
+
+# --- the client factory ---------------------------------------------------
+
+
+async def test_create_redis_builds_a_client_that_works(redis_url: str) -> None:
+    """The library's own factory, against a real server.
+
+    Every other test here builds its client with ``redis_asyncio.from_url``, so
+    the pool ``create_redis`` actually hands to services -- keepalive, health
+    checks, timeouts, ``retry_on_timeout`` -- was never once accepted by a real
+    Redis. redis-py has changed the meaning of those arguments across releases,
+    and a combination it rejects fails at connect time in production and nowhere
+    in the suite.
+    """
+    settings = RedisSettings(url=redis_url, max_connections=3)
+    client = create_redis(settings)
+
+    try:
+        assert await client.ping() is True
+        await client.set("factory:probe", "ok")
+        assert await client.get("factory:probe") == "ok"  # decoded, not bytes
+    finally:
+        await client.aclose()
+
+
+async def test_create_redis_can_speak_bytes(redis_url: str) -> None:
+    """``decode_responses=False`` is what anything storing pickled or compressed
+    values needs, and it has to survive the pool the factory builds."""
+    client = create_redis(RedisSettings(url=redis_url), decode_responses=False)
+
+    try:
+        await client.set("factory:raw", b"\x00\x01binary")
+        assert await client.get("factory:raw") == b"\x00\x01binary"
+    finally:
+        await client.aclose()

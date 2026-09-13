@@ -33,6 +33,19 @@ from sqlalchemy.pool import NullPool
 
 
 @pytest.fixture
+def redis_url() -> str:
+    """The URL itself, for tests that build their own client.
+
+    Same skip rule as :func:`redis_client` -- per-fixture, never a
+    module-level ``pytestmark`` in this file, which pytest ignores here.
+    """
+    url = os.getenv("REDIS_TEST_URL")
+    if not url:
+        pytest.skip("REDIS_TEST_URL is not set; skipping real-Redis integration tests")
+    return url
+
+
+@pytest.fixture
 async def redis_client() -> AsyncIterator[Redis]:
     """A client on a flushed database, or a skip when no Redis was provided.
 
