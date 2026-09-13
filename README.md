@@ -113,14 +113,17 @@ them),
 and list values must be JSON — `CORS__ORIGINS=a,b` raises `SettingsError` at
 start-up, `CORS__ORIGINS=["a","b"]` is the form.
 
-A test walks the settings classes and the file in both directions, so a setting
+Tests walk the settings classes and the file in both directions, so a setting
 added without documenting it — or a key left behind after one is removed —
-fails CI rather than a consuming service.
+fails CI rather than a consuming service. A further one asserts that every
+settings group `pycommon.config` exports is among the classes those checks
+walk, since that list is written by hand and would otherwise be the way the
+guarantee quietly narrows.
 
 ## Middleware configuration
 
 Everything that differs between deployments is a setting, not a function
-argument, so an operator changes it without asking for a release. Two nested
+argument, so an operator changes it without asking for a release. Three nested
 groups are on `BaseAppSettings` itself, since every HTTP service needs them:
 
 | Env key | Default | What it does |
@@ -132,12 +135,16 @@ groups are on `BaseAppSettings` itself, since every HTTP service needs them:
 | `HTTP__MAX_BODY_BYTES` | unset | reject request bodies larger than this |
 | `HTTP__GZIP_MIN_SIZE` | unset | gzip responses at least this many bytes; unset installs no compression |
 | `HTTP__IDEMPOTENCY_TTL_SECONDS` | `86400` | how long a replayable response is kept |
+| `HTTP__PROBLEM_TYPE_BASE_URL` | unset | prefix for RFC 9457 `type` URIs; unset emits path-absolute ones |
+| `CORS__ORIGINS` | `["http://localhost:5173"]` | allowed browser origins (JSON array) |
+| `CORS__ALLOW_CREDENTIALS` | `true` | allow cookies / `Authorization` cross-origin |
+| `CORS__ALLOW_METHODS` / `CORS__ALLOW_HEADERS` | `["*"]` / `["*"]` | allowed methods and headers |
 | `SERVER__HOST` / `SERVER__PORT` | `0.0.0.0` / `8000` | uvicorn bind |
 | `SERVER__FORWARDED_ALLOW_IPS` | unset | peers whose `X-Forwarded-*` to trust |
 | `SERVER__DRAIN_DELAY_SECONDS` | `0` | keep serving this long after SIGTERM |
 
 ```python
-apply_standard_middleware(app, settings)      # reads settings.http
+apply_standard_middleware(app, settings)      # reads settings.http and settings.cors
 run_from_settings("main:app", settings.server)
 ```
 
@@ -422,7 +429,7 @@ from pycommon.http import ApiResponse
 return ApiResponse.ok({"id": order.id})
 ```
 
-Set `PROBLEM_TYPE_BASE_URL=https://docs.example.com/problems` to emit absolute `type` URIs.
+Set `HTTP__PROBLEM_TYPE_BASE_URL=https://docs.example.com/problems` to emit absolute `type` URIs.
 
 ## Persistence notes
 

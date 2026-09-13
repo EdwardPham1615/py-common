@@ -15,10 +15,13 @@ versioning follows [Semantic Versioning](https://semver.org/).
   `HTTP__PROBLEM_TYPE_BASE_URL`, and `settings.problem_type_base_url` becomes
   `settings.http.problem_type_base_url`.
 
-  *Migration:* rename the variable and the attribute. It is passed to
-  `register_exception_handlers` and `build_problem_types_router` by hand, so a
-  missed rename is an `AttributeError` at start-up rather than the silent
-  fallback the CORS keys have.
+  *Migration:* rename both the environment variable and the attribute, and note
+  that the two fail differently. A missed **attribute** is loud — services pass
+  it to `register_exception_handlers` and `build_problem_types_router` by hand,
+  so `settings.problem_type_base_url` raises `AttributeError` at start-up. A
+  missed **environment variable** is silent, exactly like the CORS keys:
+  `extra="ignore"` drops it and problem `type` URIs quietly go back to being
+  path-absolute.
 
 - **BREAKING — CORS settings moved into their own group.** They were four flat
   fields on `BaseAppSettings` while every other middleware knob sat under a
@@ -40,9 +43,9 @@ versioning follows [Semantic Versioning](https://semver.org/).
   silently** — `model_config` sets `extra="ignore"`, so the old key is dropped
   without a word and CORS falls back to its default of
   `["http://localhost:5173"]`, which a browser then enforces against your real
-  frontend. Grep deployment manifests for `CORS_` before upgrading. This is
-  exactly the kind of rename that is cheap now and expensive later, which is why
-  it was made before the library had consumers rather than after.
+  frontend. **Grep deployment manifests for `CORS_` before upgrading** — that is
+  the only thing standing between the old spelling and a production CORS
+  failure with nothing in the logs.
 
 - **Log lines no longer carry a duplicate `level` and `timestamp`.** Every line
   a service wrote contained both `log.level` and `level`, and both `@timestamp`
@@ -90,10 +93,12 @@ versioning follows [Semantic Versioning](https://semver.org/).
   It also states the two rules that are invisible until they bite: nested keys
   follow the *field name a service declares* (`postgres: DatabaseSettings` is
   what makes the prefix `POSTGRES__`), and list values must be JSON —
-  `CORS_ORIGINS=a,b` raises `SettingsError` at start-up.
+  `CORS__ORIGINS=a,b` raises `SettingsError` at start-up.
 
-  A test compares the file against the settings classes in both directions, so
-  it cannot drift out of date without failing CI.
+  Tests compare the file against the settings classes in both directions, so it
+  cannot drift out of date without failing CI — including a check that every
+  settings group `pycommon.config` exports is one of the classes being compared,
+  because that list is maintained by hand.
 
 - **Opt-in gzip response compression.** `HTTP__GZIP_MIN_SIZE` installs
   Starlette's `GZipMiddleware` in the standard stack; unset — the default —
