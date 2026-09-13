@@ -65,3 +65,91 @@ async def test_shutdown_error_does_not_block_others() -> None:
         pass
 
     assert "stop:db" in events
+
+
+# --- the gRPC server the lifespan also owns -------------------------------
+#
+# A service that speaks both HTTP and gRPC hangs its gRPC server off the same
+# lifespan, so the ordering guarantees have to hold for it too: started after
+# the resources it depends on, stopped before them.
+
+
+class _FakeGrpcServer:
+    """Stands in for GrpcServer — the lifespan only ever calls start/stop."""
+
+    def __init__(self, events: list[str], *, fail_stop: bool = False) -> None:
+        self._events = events
+        self._fail_stop = fail_stop
+
+    async def start(self) -> None:
+        self._events.append("start:grpc")
+
+    async def stop(self) -> None:
+        if self._fail_stop:
+            raise RuntimeError("grpc refused to stop")
+        self._events.append("stop:grpc")
+
+
+async def test_grpc_server_starts_after_resources_and_stops_before_them() -> None:
+    """gRPC handlers use the database and the cache, so it must not accept a
+    call before they are up, nor keep accepting after they are gone."""
+    events: list[str] = []
+    app = FastAPI()
+    grpc = _FakeGrpcServer(events)
+    lifespan = build_lifespan([_resource("db", events)], grpc_server=grpc)
+
+    async with lifespan(app):
+        assert events == ["start:db", "start:grpc"]
+        # Exposed so handlers and tests can reach the running server.
+        assert app.state.grpc_server is grpc
+
+    assert events == ["start:db", "start:grpc", "stop:grpc", "stop:db"]
+
+
+async def test_grpc_server_is_not_stopped_when_it_never_started() -> None:
+    """A resource failing before gRPC's turn must not produce a stop() on a
+    server that was never started."""
+    events: list[str] = []
+    grpc = _FakeGrpcServer(events)
+    lifespan = build_lifespan([_resource("broken", events, fail_startup=True)], grpc_server=grpc)
+
+    with pytest.raises(RuntimeError, match="broken failed"):
+        async with lifespan(FastAPI()):
+            pass
+
+    assert events == []
+
+
+async def test_a_failing_grpc_stop_does_not_block_resource_shutdown() -> None:
+    """Shutdown is a sequence of best-effort steps; one refusing must not strand
+    a database connection pool."""
+    events: list[str] = []
+    lifespan = build_lifespan(
+        [_resource("db", events)],
+        grpc_server=_FakeGrpcServer(events, fail_stop=True),
+    )
+
+    async with lifespan(FastAPI()):
+        pass
+
+    assert events == ["start:db", "start:grpc", "stop:db"]
+
+
+async def test_a_resource_without_a_shutdown_hook_is_skipped() -> None:
+    """``shutdown`` is optional: plenty of resources only need starting."""
+    events: list[str] = []
+
+    async def startup() -> None:
+        events.append("start:readonly")
+
+    lifespan = build_lifespan(
+        [
+            LifespanResource(name="readonly", startup=startup),
+            _resource("db", events),
+        ]
+    )
+
+    async with lifespan(FastAPI()):
+        pass
+
+    assert events == ["start:readonly", "start:db", "stop:db"]
