@@ -57,21 +57,39 @@ def setup_logging(
     """Configure structlog + stdlib logging for ECS JSON output."""
     log_level = getattr(logging, level.upper(), logging.INFO)
 
+    # The level and timestamp processors differ per renderer, because the two
+    # renderers want opposite things.
+    #
+    # ecs_logging derives ``log.level`` from the method name itself and only
+    # fills in ``@timestamp`` when the event does not already carry one. Adding
+    # ``add_log_level`` and a plain ``timestamp`` key on top of that produced a
+    # second copy of each -- ``level`` beside ``log.level``, ``timestamp``
+    # beside ``@timestamp`` -- on every line every service ever wrote. Stamping
+    # straight into ``@timestamp`` keeps the time the event happened rather than
+    # the time it was rendered, which is what ecs_logging would otherwise use.
+    #
+    # ConsoleRenderer is the opposite: it reads ``level`` and ``timestamp`` to
+    # build its prefix, and without them a dev run loses the level entirely and
+    # trails ``@timestamp`` as an ordinary key=value pair.
+    renderer: Any
+    if json_logs:
+        level_processors: list[Any] = []
+        timestamper = structlog.processors.TimeStamper(fmt="iso", utc=True, key="@timestamp")
+        renderer = ecs_logging.StructlogFormatter()
+    else:
+        level_processors = [structlog.stdlib.add_log_level]
+        timestamper = structlog.processors.TimeStamper(fmt="iso", utc=True)
+        renderer = structlog.dev.ConsoleRenderer()
+
     shared_processors: list[Any] = [
         structlog.contextvars.merge_contextvars,
-        structlog.stdlib.add_log_level,
+        *level_processors,
         structlog.stdlib.add_logger_name,
-        structlog.processors.TimeStamper(fmt="iso", utc=True),
+        timestamper,
         structlog.processors.StackInfoRenderer(),
         _add_otel_context,
         _add_service_info(service_name, environment),
     ]
-
-    if json_logs:
-        # ecs_logging.StructlogFormatter must be last — it handles JSON + ECS enrichment
-        renderer: Any = ecs_logging.StructlogFormatter()
-    else:
-        renderer = structlog.dev.ConsoleRenderer()
 
     structlog.configure(
         processors=[
