@@ -200,9 +200,11 @@ code, so treat these as closed unless something new contradicts them:
 ### Known gaps
 
 - Not implemented, and deliberately so far unclaimed: GZip/compression
-  middleware, the transactional outbox (there is a TODO pointing at it in
-  `persistence/unit_of_work.py:14`), bulkhead/concurrency limiting, feature
-  flags, audit-log helpers, Sentry integration.
+  middleware, the transactional outbox, bulkhead/concurrency limiting, feature
+  flags, audit-log helpers, Sentry integration. For the outbox, `UnitOfWork`'s
+  docstring (`persistence/unit_of_work.py:13-14`) states the limitation it
+  would close — cross-engine coordination is out of scope, and callers are told
+  to document that until a saga/outbox exists.
 - Coverage sits around 87% against an 85% floor, so there is roughly two
   points of headroom — a sizeable untested addition will fail `make test-cov`
   on the floor, not just look untidy.
