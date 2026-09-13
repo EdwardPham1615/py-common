@@ -43,6 +43,24 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **`.env.example`** — a reference for every setting the library reads: 77 keys
+  across the core settings, `SERVER__`, `HTTP__`, `POSTGRES__`, `REDIS__`,
+  `KEYCLOAK__`, `OTEL__`, `S3__` and `PROFILER__`, each with its real default
+  and, where it matters, the reason the default is what it is. Copy it into a
+  service with `cp .env.example .env`: every key is live and set to the value
+  pycommon already uses, so a fresh copy changes nothing — it starts the service
+  exactly as an empty `.env` would. The eight settings whose default is *off*
+  stay commented out, since no value expresses unset, and each shows an example
+  of the shape it wants.
+
+  It also states the two rules that are invisible until they bite: nested keys
+  follow the *field name a service declares* (`postgres: DatabaseSettings` is
+  what makes the prefix `POSTGRES__`), and list values must be JSON —
+  `CORS_ORIGINS=a,b` raises `SettingsError` at start-up.
+
+  A test compares the file against the settings classes in both directions, so
+  it cannot drift out of date without failing CI.
+
 - **Opt-in gzip response compression.** `HTTP__GZIP_MIN_SIZE` installs
   Starlette's `GZipMiddleware` in the standard stack; unset — the default —
   installs nothing and responses go out byte-for-byte as before, so upgrading

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -12,7 +13,13 @@ from pycommon.config import (
     BaseAppSettings,
     DatabaseSettings,
     Environment,
+    HttpSettings,
     KeycloakSettings,
+    OtelSettings,
+    ProfilerSettings,
+    RedisSettings,
+    ServerSettings,
+    StorageSettings,
     get_environment,
     resolve_env_files,
 )
@@ -206,3 +213,128 @@ def test_middleware_settings_default_to_off_or_safe() -> None:
     assert settings.server.drain_delay_seconds == 0.0
     assert settings.server.forwarded_allow_ips is None
     assert settings.http.hsts is True  # the one that is safe to have on
+
+
+# --- .env.example ---------------------------------------------------------
+#
+# The sample is only useful if it is true. These check it against the settings
+# classes in both directions, so adding a field without documenting it, or
+# leaving a key behind after removing one, fails here rather than in a
+# consuming service.
+
+ENV_EXAMPLE = Path(__file__).resolve().parent.parent / ".env.example"
+
+# The field name a service is expected to give each group, which is what
+# decides the env prefix. Documented at the top of .env.example.
+SETTINGS_GROUPS = {
+    "POSTGRES": DatabaseSettings,
+    "REDIS": RedisSettings,
+    "KEYCLOAK": KeycloakSettings,
+    "OTEL": OtelSettings,
+    "S3": StorageSettings,
+    "PROFILER": ProfilerSettings,
+    "HTTP": HttpSettings,
+    "SERVER": ServerSettings,
+}
+
+
+def _documented_keys() -> dict[str, str]:
+    """Every ``KEY=value`` in the sample, commented out or not.
+
+    Prose lines start with ``# `` (hash, space); keys are written ``#KEY=`` so
+    the two never collide.
+    """
+    keys: dict[str, str] = {}
+    for line in ENV_EXAMPLE.read_text().splitlines():
+        match = re.match(r"^#?([A-Z][A-Z0-9_]*)=(.*)$", line)
+        if match:
+            keys[match.group(1)] = match.group(2)
+    return keys
+
+
+def _settings_keys() -> set[str]:
+    keys = {name.upper() for name in BaseAppSettings.model_fields if name not in ("http", "server")}
+    for prefix, model in SETTINGS_GROUPS.items():
+        keys |= {f"{prefix}__{name.upper()}" for name in model.model_fields}
+    return keys
+
+
+def test_env_example_documents_every_setting() -> None:
+    missing = _settings_keys() - set(_documented_keys())
+    assert not missing, f".env.example is missing: {sorted(missing)}"
+
+
+def test_env_example_has_no_keys_that_do_not_exist() -> None:
+    extra = set(_documented_keys()) - _settings_keys()
+    assert not extra, f".env.example documents settings that do not exist: {sorted(extra)}"
+
+
+def _all_groups_settings() -> type[BaseAppSettings]:
+    """A service that declares every optional group, so every prefix is live."""
+
+    class Settings(BaseAppSettings):
+        postgres: DatabaseSettings = DatabaseSettings()
+        redis: RedisSettings = RedisSettings()
+        keycloak: KeycloakSettings = KeycloakSettings()
+        otel: OtelSettings = OtelSettings()
+        s3: StorageSettings = StorageSettings()
+        profiler: ProfilerSettings = ProfilerSettings()
+
+    return Settings
+
+
+def test_env_example_parses_when_fully_uncommented(tmp_path: Path) -> None:
+    """Every value in it has to be syntactically valid.
+
+    Lists are the trap: pydantic-settings wants JSON, and the comma-separated
+    form people reach for first raises SettingsError at start-up.
+    """
+
+    Settings = _all_groups_settings()
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("\n".join(f"{k}={v}" for k, v in _documented_keys().items()))
+
+    settings = Settings(_env_file=env_file)
+
+    # A spot check that the values landed where the prefixes say they do.
+    assert settings.postgres.pool_recycle_seconds == 1800
+    assert settings.redis.url == "redis://localhost:6379/0"
+    assert settings.profiler.filter_paths == ["/health", "/health/live", "/health/ready"]
+
+
+def test_env_example_copied_verbatim_changes_nothing(tmp_path: Path) -> None:
+    """``cp .env.example .env`` must start the service exactly as before.
+
+    Every key in the file is live, so a copy is only safe to hand people if the
+    values in it really are the defaults. Loaded as written -- comments and all
+    -- it has to produce the same settings an empty file would.
+    """
+    settings_cls = _all_groups_settings()
+
+    copied = tmp_path / ".env"
+    copied.write_text(ENV_EXAMPLE.read_text())
+
+    assert settings_cls(_env_file=copied).model_dump() == settings_cls(_env_file=None).model_dump()
+
+
+def test_commented_keys_are_the_ones_with_no_default() -> None:
+    """Only the settings whose default is "off" may stay commented out.
+
+    No value expresses unset: an empty number fails to parse and an empty
+    string is a different thing. Everything else has a default that can be
+    written down, so it is written down.
+    """
+    commented = {
+        line.lstrip("#").split("=", 1)[0]
+        for line in ENV_EXAMPLE.read_text().splitlines()
+        if re.match(r"^#[A-Z][A-Z0-9_]*=", line)
+    }
+    unset_by_default = set()
+    for prefix, model in (("", BaseAppSettings), *SETTINGS_GROUPS.items()):
+        for name, field in model.model_fields.items():
+            if name in ("http", "server") or field.default is not None:
+                continue
+            unset_by_default.add(f"{prefix}__{name.upper()}" if prefix else name.upper())
+
+    assert commented == unset_by_default
