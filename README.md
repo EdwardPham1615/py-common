@@ -108,9 +108,10 @@ fails to parse and an empty string is a different thing from unset. Each shows
 an example of the shape it wants. Two things the file spells out that cost
 people an afternoon otherwise: nested keys follow the **field name your
 service declares** (`postgres: DatabaseSettings` is what makes the prefix
-`POSTGRES__`, and only `http` and `server` exist without you declaring them),
-and list values must be JSON — `CORS_ORIGINS=a,b` raises `SettingsError` at
-start-up, `CORS_ORIGINS=["a","b"]` is the form.
+`POSTGRES__`, and only `http`, `server` and `cors` exist without you declaring
+them),
+and list values must be JSON — `CORS__ORIGINS=a,b` raises `SettingsError` at
+start-up, `CORS__ORIGINS=["a","b"]` is the form.
 
 A test walks the settings classes and the file in both directions, so a setting
 added without documenting it — or a key left behind after one is removed —

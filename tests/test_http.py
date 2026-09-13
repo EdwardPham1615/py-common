@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
@@ -588,3 +590,55 @@ def test_timeout_is_installed_from_settings() -> None:
         app, BaseAppSettings(_env_file=None, http=HttpSettings(timeout_seconds=0.1))
     )
     assert TestClient(app).get("/slow").status_code == 504
+
+
+def test_cors_settings_reach_the_middleware() -> None:
+    """The group has to be wired through, not just declared.
+
+    ``extra="ignore"`` means a key that goes to the wrong place is dropped in
+    silence: CORS would keep its localhost default and a browser would enforce
+    that against the real frontend, with nothing in the logs to say why.
+    """
+    from fastapi.middleware.cors import CORSMiddleware
+
+    from pycommon.config import CorsSettings
+    from pycommon.http.middleware import apply_standard_middleware
+
+    app = FastAPI()
+    apply_standard_middleware(
+        app,
+        BaseAppSettings(
+            _env_file=None,
+            cors=CorsSettings(
+                origins=["https://app.example.com"],
+                allow_credentials=False,
+                allow_methods=["GET"],
+                allow_headers=["authorization"],
+            ),
+        ),
+    )
+
+    (installed,) = [m for m in app.user_middleware if m.cls is CORSMiddleware]
+    assert installed.kwargs["allow_origins"] == ["https://app.example.com"]
+    assert installed.kwargs["allow_credentials"] is False
+    assert installed.kwargs["allow_methods"] == ["GET"]
+    assert installed.kwargs["allow_headers"] == ["authorization"]
+
+
+def test_cors_origin_from_the_env_prefix_is_honoured(tmp_path: Path) -> None:
+    """End to end from CORS__ORIGINS to the response header."""
+    env_file = tmp_path / ".env"
+    env_file.write_text('CORS__ORIGINS=["https://app.example.com"]\n')
+
+    app = FastAPI()
+
+    @app.get("/ping")
+    async def ping() -> dict[str, str]:
+        return {"ok": "yes"}
+
+    from pycommon.http.middleware import apply_standard_middleware
+
+    apply_standard_middleware(app, BaseAppSettings(_env_file=env_file))
+
+    response = TestClient(app).get("/ping", headers={"Origin": "https://app.example.com"})
+    assert response.headers["access-control-allow-origin"] == "https://app.example.com"

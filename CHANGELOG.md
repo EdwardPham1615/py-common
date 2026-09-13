@@ -10,6 +10,30 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **BREAKING — CORS settings moved into their own group.** They were four flat
+  fields on `BaseAppSettings` while every other middleware knob sat under a
+  prefix, which made `HTTP__HSTS` and `CORS_ORIGINS` two spellings of the same
+  kind of setting.
+
+  | Was | Now |
+  |---|---|
+  | `CORS_ORIGINS` | `CORS__ORIGINS` |
+  | `CORS_ALLOW_CREDENTIALS` | `CORS__ALLOW_CREDENTIALS` |
+  | `CORS_ALLOW_METHODS` | `CORS__ALLOW_METHODS` |
+  | `CORS_ALLOW_HEADERS` | `CORS__ALLOW_HEADERS` |
+
+  In code, `settings.cors_origins` becomes `settings.cors.origins`, and
+  `CorsSettings` is exported from `pycommon.config` for anything that builds it
+  directly.
+
+  *Migration:* rename the four environment variables. **A missed one fails
+  silently** — `model_config` sets `extra="ignore"`, so the old key is dropped
+  without a word and CORS falls back to its default of
+  `["http://localhost:5173"]`, which a browser then enforces against your real
+  frontend. Grep deployment manifests for `CORS_` before upgrading. This is
+  exactly the kind of rename that is cheap now and expensive later, which is why
+  it was made before the library had consumers rather than after.
+
 - **Log lines no longer carry a duplicate `level` and `timestamp`.** Every line
   a service wrote contained both `log.level` and `level`, and both `@timestamp`
   and `timestamp`, holding the same value twice:

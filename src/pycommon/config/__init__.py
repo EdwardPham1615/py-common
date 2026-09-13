@@ -3,6 +3,7 @@
 from pycommon.config.environment import Environment, get_environment, resolve_env_files
 from pycommon.config.settings import (
     BaseAppSettings,
+    CorsSettings,
     DatabaseSettings,
     HttpSettings,
     KeycloakSettings,
@@ -15,6 +16,7 @@ from pycommon.config.settings import (
 
 __all__ = [
     "BaseAppSettings",
+    "CorsSettings",
     "DatabaseSettings",
     "Environment",
     "HttpSettings",

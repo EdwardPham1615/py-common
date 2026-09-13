@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from pycommon.config import (
     BaseAppSettings,
+    CorsSettings,
     DatabaseSettings,
     Environment,
     HttpSettings,
@@ -227,6 +228,7 @@ ENV_EXAMPLE = Path(__file__).resolve().parent.parent / ".env.example"
 # The field name a service is expected to give each group, which is what
 # decides the env prefix. Documented at the top of .env.example.
 SETTINGS_GROUPS = {
+    "CORS": CorsSettings,
     "POSTGRES": DatabaseSettings,
     "REDIS": RedisSettings,
     "KEYCLOAK": KeycloakSettings,
@@ -236,6 +238,10 @@ SETTINGS_GROUPS = {
     "HTTP": HttpSettings,
     "SERVER": ServerSettings,
 }
+
+
+# Which BaseAppSettings fields are groups rather than flat values.
+SETTINGS_GROUPS_BY_FIELD = {"http", "server", "cors"}
 
 
 def _documented_keys() -> dict[str, str]:
@@ -253,7 +259,8 @@ def _documented_keys() -> dict[str, str]:
 
 
 def _settings_keys() -> set[str]:
-    keys = {name.upper() for name in BaseAppSettings.model_fields if name not in ("http", "server")}
+    nested = set(SETTINGS_GROUPS_BY_FIELD)
+    keys = {name.upper() for name in BaseAppSettings.model_fields if name not in nested}
     for prefix, model in SETTINGS_GROUPS.items():
         keys |= {f"{prefix}__{name.upper()}" for name in model.model_fields}
     return keys
@@ -333,7 +340,7 @@ def test_commented_keys_are_the_ones_with_no_default() -> None:
     unset_by_default = set()
     for prefix, model in (("", BaseAppSettings), *SETTINGS_GROUPS.items()):
         for name, field in model.model_fields.items():
-            if name in ("http", "server") or field.default is not None:
+            if name in SETTINGS_GROUPS_BY_FIELD or field.default is not None:
                 continue
             unset_by_default.add(f"{prefix}__{name.upper()}" if prefix else name.upper())
 
