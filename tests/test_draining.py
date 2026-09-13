@@ -136,3 +136,112 @@ def test_drain_delay_rejects_reload() -> None:
     nothing at all."""
     with pytest.raises(ValueError, match="reload"):
         run_uvicorn("app:app", reload=True, drain_delay_seconds=5.0)
+
+
+# --- what actually gets run ------------------------------------------------
+#
+# run_uvicorn picks one of two paths and builds the server for the second one.
+# Nothing here binds a port: uvicorn.run and asyncio.run are the boundary, and
+# the point is which one is called with what.
+
+
+def test_no_drain_delay_runs_uvicorn_directly(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The default path has to stay the plain one -- a service that never asked
+    for draining should not get a DrainingServer and an extra event loop."""
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: captured.update(app=app, **kw))
+    monkeypatch.setattr(
+        "pycommon.runtime.uvicorn.DrainingServer",
+        lambda *a, **kw: pytest.fail("DrainingServer must not be built without a drain delay"),
+    )
+
+    run_uvicorn("main:app", host="127.0.0.1", port=9001, forwarded_allow_ips="10.0.0.0/8")
+
+    assert captured["app"] == "main:app"
+    assert captured["host"] == "127.0.0.1"
+    assert captured["port"] == 9001
+    assert captured["forwarded_allow_ips"] == "10.0.0.0/8"
+    # None disables uvicorn's own logging config, which is what keeps structlog
+    # the only thing formatting output.
+    assert captured["log_config"] is None
+
+
+def test_drain_delay_builds_a_draining_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    built: dict[str, object] = {}
+    served: list[object] = []
+
+    class _Recorder(DrainingServer):
+        def __init__(self, config: uvicorn.Config, *, drain_delay_seconds: float) -> None:
+            super().__init__(config, drain_delay_seconds=drain_delay_seconds)
+            built.update(config=config, delay=drain_delay_seconds)
+
+        async def serve(self, sockets: object = None) -> None:
+            served.append(self)
+
+    monkeypatch.setattr("pycommon.runtime.uvicorn.DrainingServer", _Recorder)
+    monkeypatch.setattr(uvicorn, "run", lambda *a, **kw: pytest.fail("should not be reached"))
+
+    run_uvicorn("main:app", host="127.0.0.1", port=9002, drain_delay_seconds=7.5)
+
+    assert built["delay"] == 7.5
+    config = built["config"]
+    assert isinstance(config, uvicorn.Config)
+    assert config.host == "127.0.0.1"
+    assert config.port == 9002
+    assert len(served) == 1
+
+
+async def test_serve_captures_the_loop_it_runs_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``handle_exit`` runs in a signal handler and hands work to this loop.
+
+    Without it captured, the first signal takes the no-loop path and exits
+    immediately -- the drain would be configured and do nothing, which is the
+    failure the whole class exists to avoid.
+    """
+
+    async def fake_serve(self: object, sockets: object = None) -> None:
+        return None
+
+    monkeypatch.setattr(uvicorn.Server, "serve", fake_serve)
+    server = _server(1.0)
+    assert server._loop is None
+
+    await server.serve()
+
+    assert server._loop is asyncio.get_running_loop()
+
+
+def test_run_from_settings_passes_the_whole_server_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reason ServerSettings exists: an operator changes
+    SERVER__DRAIN_DELAY_SECONDS instead of asking for a release. That only holds
+    if every field actually reaches uvicorn."""
+    from pycommon.config import ServerSettings
+    from pycommon.runtime.uvicorn import run_from_settings
+
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        "pycommon.runtime.uvicorn.run_uvicorn",
+        lambda app, **kw: captured.update(app=app, **kw),
+    )
+
+    run_from_settings(
+        "main:app",
+        ServerSettings(
+            host="127.0.0.1",
+            port=9003,
+            forwarded_allow_ips="10.0.0.0/8",
+            drain_delay_seconds=12.0,
+        ),
+    )
+
+    assert captured == {
+        "app": "main:app",
+        "host": "127.0.0.1",
+        "port": 9003,
+        "forwarded_allow_ips": "10.0.0.0/8",
+        "drain_delay_seconds": 12.0,
+        "reload": False,
+        "log_config": None,
+    }
