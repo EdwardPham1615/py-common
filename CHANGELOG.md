@@ -10,6 +10,16 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **BREAKING — `PROBLEM_TYPE_BASE_URL` moved under `HTTP__`.** It was the last
+  flat field configuring the HTTP surface. `PROBLEM_TYPE_BASE_URL` becomes
+  `HTTP__PROBLEM_TYPE_BASE_URL`, and `settings.problem_type_base_url` becomes
+  `settings.http.problem_type_base_url`.
+
+  *Migration:* rename the variable and the attribute. It is passed to
+  `register_exception_handlers` and `build_problem_types_router` by hand, so a
+  missed rename is an `AttributeError` at start-up rather than the silent
+  fallback the CORS keys have.
+
 - **BREAKING — CORS settings moved into their own group.** They were four flat
   fields on `BaseAppSettings` while every other middleware knob sat under a
   prefix, which made `HTTP__HSTS` and `CORS_ORIGINS` two spellings of the same
