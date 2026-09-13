@@ -7,6 +7,12 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    # Move the lockfile, leave the constraints alone. Without this, dependabot
+    # also raises the floors in pyproject.toml -- and a floor is a promise to
+    # every consuming service: raising `fastapi>=0.115` to `>=0.141` makes the
+    # next tag uninstallable for anyone pinned below it, to pick up a patch
+    # release they would have resolved to anyway.
+    versioning-strategy: lockfile-only
     groups:
       # One pull request for routine bumps: reviewing ten separate patch-level
       # updates a week is how people start rubber-stamping them.

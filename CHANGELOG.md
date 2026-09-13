@@ -186,6 +186,37 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **BREAKING — the minimum supported version of twelve dependencies went up.**
+  Automated dependency updates raised the floors in `pyproject.toml`, not just
+  the resolved versions in `uv.lock`:
+
+  | Package | Was | Now | Where |
+  |---|---|---|---|
+  | `pydantic` | `>=2.11.0` | `>=2.13.5` | always installed |
+  | `pydantic-settings` | `>=2.9.0` | `>=2.15.0` | always installed |
+  | `python-dotenv` | `>=1.0.0` | `>=1.2.3` | always installed |
+  | `anyio` | `>=4.0.0` | `>=4.15.1` | always installed |
+  | `fastapi` | `>=0.115.0` | `>=0.141.1` | `http`, `security`, `telemetry`, `runtime` |
+  | `starlette` | `>=0.46.0` | `>=1.6.0` | `http` |
+  | `grpcio` | `>=1.71.0` | `>=1.83.1` | `grpc`, `runtime` |
+  | `uvicorn[standard]` | `>=0.34.0` | `>=0.52.3` | `runtime` |
+  | `sqlalchemy[asyncio]` | `>=2.0.40` | `>=2.0.52` | `persistence` |
+  | `alembic` | `>=1.14.0` | `>=1.19.2` | `migrations` |
+  | `psycopg[binary]` | `>=3.2.0` | `>=3.3.4` | `migrations` |
+  | `redis` | `>=5.0.0` | `>=8.1.0` | `cache` |
+
+  *Migration:* a service pinned below any of these floors cannot install this
+  release — resolution fails outright rather than degrading, so it surfaces at
+  install time, not in production. `fastapi`, `starlette` and `redis` move the
+  furthest and are the ones to check first. Upgrade to versions at or above the
+  floor, or stay on the previous tag. Nothing in the library's own code
+  required these versions; the suite passes on the new set, and passed on the
+  old one.
+
+  Dependabot now runs with `versioning-strategy: lockfile-only`, so future
+  automated updates move `uv.lock` and leave the constraints alone. A floor
+  rises when something here actually needs it, and carries its own note.
+
 - **BREAKING (licensing) — pycommon is now MIT licensed.** It previously shipped
   under an "all rights reserved" proprietary LICENSE, and `pyproject.toml`
   declared `Proprietary`, which meant nobody outside the organisation had the
