@@ -184,17 +184,21 @@ code, so treat these as closed unless something new contradicts them:
   "Libraries we deliberately don't vendor"; the ideas worth taking from the
   Redis SDK — fail-open with a `degraded` flag, the `"100/minute"` rate DSL,
   `X-RateLimit-*` headers — are already implemented in `pycommon.cache`.
+- **The gRPC request-ID interceptor wraps the handler behavior, not the
+  lookup.** `intercept_service` only resolves a handler and returns before it
+  runs, and the old `bind_contextvars` there was never unwound, so a request ID
+  outlived its RPC. `RequestIdServerInterceptor` now `_replace`s the behavior
+  (all four shapes, via `runtime/_grpc_behavior.py`, shared with
+  `MetricsServerInterceptor`) and holds `bound_contextvars` for exactly the
+  handler's lifetime. Binding in `intercept_service` again reintroduces the
+  leak.
+
 - **`CelerySettings`/`MongoSettings` were deleted, not implemented.** They
   had been exported with no module using them. Don't re-add settings ahead of
   the code that consumes them.
 
 ### Known gaps
 
-- `RequestIdServerInterceptor.intercept_service`
-  (`runtime/grpc_interceptors.py:40`) calls
-  `structlog.contextvars.bind_contextvars` and never unbinds or clears it —
-  flagged in the audit and still unaddressed. Anything touching that
-  interceptor should fix it rather than build on it.
 - Not implemented, and deliberately so far unclaimed: GZip/compression
   middleware, the transactional outbox (there is a TODO pointing at it in
   `persistence/unit_of_work.py:14`), bulkhead/concurrency limiting, feature

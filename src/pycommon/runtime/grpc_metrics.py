@@ -16,17 +16,10 @@ from typing import Any
 import grpc
 from grpc import aio
 
+from pycommon.runtime._grpc_behavior import behavior_field
 from pycommon.telemetry.metrics import rpc_server_duration
 
 __all__ = ["MetricsServerInterceptor", "metrics_server_interceptors"]
-
-# (request_streaming, response_streaming) -> the handler field holding the behavior.
-_BEHAVIOR_FIELD = {
-    (False, False): "unary_unary",
-    (False, True): "unary_stream",
-    (True, False): "stream_unary",
-    (True, True): "stream_stream",
-}
 
 
 def _split_method(full_method: str) -> tuple[str, str]:
@@ -68,10 +61,10 @@ class MetricsServerInterceptor(aio.ServerInterceptor):  # type: ignore[misc]
         if handler is None:
             return None
 
-        field = _BEHAVIOR_FIELD[(handler.request_streaming, handler.response_streaming)]
-        behavior = getattr(handler, field, None)
-        if behavior is None:
+        field = behavior_field(handler)
+        if field is None:
             return handler
+        behavior = getattr(handler, field)
 
         service, method = _split_method(str(handler_call_details.method))
         base = {"rpc.system": "grpc", "rpc.service": service, "rpc.method": method}

@@ -10,6 +10,20 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **A gRPC request ID leaked into every later call on the same context.**
+  `RequestIdServerInterceptor` bound `request_id` to structlog contextvars in
+  `intercept_service` and never unbound it. Two problems, one line: that hook
+  only *resolves* the handler and returns before it runs, and nothing ever
+  unwound the binding — so the ID outlived its RPC and whatever inherited that
+  context next (a later RPC, a background task, an outbound call reading
+  `current_request_id()`) logged and propagated a stale one. A wrong
+  correlation ID is worse than none: it silently merges two unrelated requests
+  in log search, with nothing to indicate it happened.
+
+  The binding now wraps the handler itself — all four RPC shapes, held across
+  every message a streaming handler yields, unwound when it ends or raises, and
+  restoring (not clearing) any context the caller had bound around the call.
+
 - **Database passwords containing a space were silently wrong.** `DatabaseSettings`
   built its DSN with `quote_plus`, which is the encoding for query strings, where
   a space becomes `+`. In the userinfo part of a URL a `+` is a literal plus and
