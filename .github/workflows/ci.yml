@@ -39,8 +39,12 @@ jobs:
 
       # No health-cmd: the image has no shell tooling to run one. A wait step
       # below polls the query API from the runner instead.
+      #
+      # Pinned for the same reason MinIO is: `latest` moving underneath a green
+      # run is not a thing CI should be exposed to, and this image has failed to
+      # come up before. Keep it in step with docker-compose.yaml.
       jaeger:
-        image: jaegertracing/all-in-one:latest
+        image: jaegertracing/all-in-one:1.76.0
         env:
           COLLECTOR_OTLP_ENABLED: "true"
         ports: ["4317:4317", "16686:16686"]

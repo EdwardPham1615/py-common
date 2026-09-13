@@ -1,0 +1,77 @@
+# Backing services for `tests/integration`. Not for running anything in
+# production, and not used by CI -- GitHub Actions starts its own service
+# containers (see .github/workflows/ci.yml). Keep the image tags here and there
+# in step: a local run that passes against a different Redis than CI uses is a
+# green run that proves less than it appears to.
+#
+#   make infra-up                 start everything, wait until healthy
+#   make test-integration-local   run the suite against it
+#   make infra-down               stop and delete the data
+#
+# Everything here is throwaway on purpose. No named volumes: the Redis fixture
+# calls FLUSHDB and the Postgres one drops and recreates its tables, so pointing
+# these at data you care about would destroy it. Credentials are the ones the
+# fixtures expect, and are worth exactly nothing.
+
+name: pycommon-dev
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: pycommon
+      POSTGRES_PASSWORD: pycommon
+      POSTGRES_DB: pycommon_test
+      # Not decoration. The official image trusts loopback connections by
+      # default, so a container reached over 127.0.0.1 never checks the
+      # password -- and a credential-handling bug then passes locally while
+      # failing in CI, which is exactly how one was found.
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pycommon -d pycommon_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  jaeger:
+    # Pinned, not `latest`: an image that moves underneath a green run is how
+    # CI broke for two days in September, and this one has failed to come up
+    # before ("Jaeger query API never became ready").
+    image: jaegertracing/all-in-one:1.76.0
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    # 4317 OTLP gRPC in, 16686 query API out -- the telemetry tests push spans
+    # to the first and read them back from the second.
+    ports: ["4317:4317", "16686:16686"]
+    healthcheck:
+      # The image ships no shell tooling, so the check runs from the outside:
+      # wget is present in the distroless base, curl is not.
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:16686/api/services"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+
+  minio:
+    # quay.io, not Docker Hub: docker.io/minio/minio stopped answering anonymous
+    # pulls, which is what broke CI in September.
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: pycommon
+      MINIO_ROOT_PASSWORD: pycommon123
+    ports: ["9000:9000"]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 3s
+      timeout: 3s
+      retries: 10

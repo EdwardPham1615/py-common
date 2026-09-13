@@ -105,36 +105,20 @@ and coerces types that asyncpg rejects outright. `tests/integration` covers what
 they cannot, against the real thing:
 
 ```bash
-docker run -d --rm -p 6379:6379 redis:7-alpine
-docker run -d --rm -p 5432:5432 \
-  -e POSTGRES_USER=pycommon -e POSTGRES_PASSWORD=pycommon -e POSTGRES_DB=pycommon_test \
-  -e POSTGRES_INITDB_ARGS="--auth-host=scram-sha-256 --auth-local=scram-sha-256" \
-  postgres:17-alpine
-
-REDIS_TEST_URL=redis://localhost:6379/15 \
-POSTGRES_TEST_DSN=postgresql+asyncpg://pycommon:pycommon@localhost:5432/pycommon_test \
-  make test-integration
+make infra-up                 # Redis, Postgres, Jaeger and MinIO; waits until healthy
+make test-integration-local   # runs tests/integration against them
+make infra-down               # stops them and deletes the data
 ```
 
-Telemetry needs a collector you can query back:
+[`docker-compose.yaml`](docker-compose.yaml) is the single place those services
+are described — image tags, ports and credentials all live there, and
+`make test-integration-local` assembles the environment variables from the same
+definitions so there is nothing to type by hand and nothing to get subtly wrong.
 
-```bash
-docker run -d --rm -p 4317:4317 -p 16686:16686 \
-  -e COLLECTOR_OTLP_ENABLED=true jaegertracing/all-in-one:latest
-
-OTLP_TEST_ENDPOINT=http://localhost:4317 JAEGER_QUERY_URL=http://localhost:16686 \
-  make test-integration
-```
-
-Object storage needs an S3-compatible server:
-
-```bash
-docker run -d --rm -p 9000:9000 \
-  -e MINIO_ROOT_USER=pycommon -e MINIO_ROOT_PASSWORD=pycommon123 \
-  quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
-
-S3_TEST_ENDPOINT=http://localhost:9000 make test-integration
-```
+To run one group on its own, set only its variables and call
+`make test-integration`: `REDIS_TEST_URL` and `POSTGRES_TEST_DSN` for Redis and
+Postgres, `OTLP_TEST_ENDPOINT` with `JAEGER_QUERY_URL` for telemetry,
+`S3_TEST_ENDPOINT` for object storage.
 
 Each group skips independently when its variable is unset. CI runs both on every
 push via service containers. If you touch a Lua script, a TTL, the lock, the
@@ -142,10 +126,12 @@ query logger or anything about pooling, run them — a green run against the
 substitutes proves the Python is coherent, not that it works on the database the
 service actually runs.
 
-Point both at **throwaway** instances. The Redis fixture calls `FLUSHDB` and the
-Postgres one drops and recreates its tables.
+If you point those variables somewhere other than the compose stack, point them
+at **throwaway** instances. The Redis fixture calls `FLUSHDB` and the Postgres
+one drops and recreates its tables. The compose services hold no volumes for
+exactly that reason.
 
-The `POSTGRES_INITDB_ARGS` above is not decoration. The official image trusts
+The `POSTGRES_INITDB_ARGS` in the compose file is not decoration. The official image trusts
 loopback connections by default, so a container reached over `127.0.0.1` never
 checks the password — and a credential-handling bug passes locally while failing
 in CI, which is exactly how one was found. Forcing `scram-sha-256` makes a local
