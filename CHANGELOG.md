@@ -8,6 +8,27 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Opt-in gzip response compression.** `HTTP__GZIP_MIN_SIZE` installs
+  Starlette's `GZipMiddleware` in the standard stack; unset — the default —
+  installs nothing and responses go out byte-for-byte as before, so upgrading
+  changes nothing for a service that has not asked for it.
+
+  What this library adds is the placement. Compression sits *outside*
+  `IdempotencyMiddleware`, so the replay store holds the plain body: a
+  compressed one would be replayed verbatim to a client that never sent
+  `Accept-Encoding: gzip` and cannot decode it. It sits *inside*
+  `MetricsMiddleware` and `RequestContextMiddleware`, so the time it costs lands
+  in `http.server.request.duration` and the access log rather than outside the
+  numbers you alert on. And *outside* `TimeoutMiddleware`, because the deadline
+  is a ceiling on the handler, not on serialising what it returned.
+
+  `text/event-stream` and pre-compressed media types are excluded (Starlette's
+  default), so SSE endpoints keep streaming. See "Response compression" in the
+  README for the two operational caveats — ingress-level compression doing the
+  same work twice, and BREACH.
+
 ## [0.2.0] - 2026-09-13
 
 ### Fixed
