@@ -8,6 +8,39 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Log lines no longer carry a duplicate `level` and `timestamp`.** Every line
+  a service wrote contained both `log.level` and `level`, and both `@timestamp`
+  and `timestamp`, holding the same value twice:
+
+  ```diff
+   {
+     "@timestamp": "2026-09-13T09:14:01.873290Z",
+  -  "timestamp":  "2026-09-13T09:14:01.873600Z",
+     "log.level": "info",
+  -  "level": "info",
+     "message": "hello"
+   }
+  ```
+
+  `ecs_logging` derives `log.level` from the log method itself and supplies
+  `@timestamp` when the event has none, so `structlog`'s `add_log_level` and its
+  default `timestamp` key were adding a second copy of each — two extra indexed
+  fields on every line, forever, saying nothing new. The timestamp is now
+  stamped straight into `@timestamp` by the processor chain, which also means it
+  records when the event happened rather than when the handler rendered it.
+
+  Console output (`json_logs=False`) is unchanged: `ConsoleRenderer` builds its
+  prefix from exactly those two keys, so it keeps them.
+
+  *Migration:* a query, dashboard or alert that reads `level` or `timestamp`
+  must read `log.level` or `@timestamp` instead. Both were already present on
+  every line, so anything already using the ECS names needs no change. Note that
+  `logger` remains under its structlog name rather than ECS's `log.logger`; that
+  rename would break existing queries without adding information, so it is left
+  alone.
+
 ### Added
 
 - **Opt-in gzip response compression.** `HTTP__GZIP_MIN_SIZE` installs

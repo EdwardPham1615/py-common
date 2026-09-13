@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -71,6 +72,22 @@ def test_console_renderer_is_not_json(capsys: pytest.CaptureFixture[str]) -> Non
     assert "hello" in out
     with pytest.raises(json.JSONDecodeError):
         json.loads(out.strip())
+
+
+def test_console_output_keeps_its_level_and_timestamp_prefix(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """ConsoleRenderer builds that prefix from the ``level`` and ``timestamp``
+    keys, so it keeps the processors the JSON path drops. Without them a dev run
+    shows no level at all and trails ``@timestamp`` as an ordinary pair."""
+    setup_logging(json_logs=False)
+    get_logger("t.console").warning("something happened")
+    out = capsys.readouterr().out
+
+    assert "warning" in out
+    assert "@timestamp=" not in out
+    # The timestamp leads the line rather than trailing it as a key=value.
+    assert out.lstrip().startswith("\x1b[2m20") or out.lstrip().startswith("20")
 
 
 def test_level_filters_events(capsys: pytest.CaptureFixture[str]) -> None:
@@ -184,3 +201,40 @@ def test_current_request_id_stringifies_a_non_string() -> None:
     """It is the one definition of the ID, so it always answers with a string."""
     structlog.contextvars.bind_contextvars(request_id=12345)
     assert current_request_id() == "12345"
+
+
+def test_json_lines_carry_no_duplicate_level_or_timestamp(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """One name per fact.
+
+    ecs_logging derives ``log.level`` from the method name and supplies
+    ``@timestamp`` itself, so adding structlog's ``level`` and ``timestamp`` on
+    top put a second copy of both on every line a service ever wrote -- two
+    extra indexed fields, forever, saying nothing new.
+    """
+    (record,) = _emit(capsys, "t.nodupes")
+
+    assert record["log.level"] == "info"
+    assert record["@timestamp"]
+    assert "level" not in record
+    assert "timestamp" not in record
+
+
+def test_timestamp_is_taken_when_the_event_happens(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Stamped by the processor chain, not by the renderer.
+
+    ecs_logging fills in ``@timestamp`` only when the event does not already
+    carry one, and it stamps at render time -- which is a handler away from when
+    the event actually occurred.
+    """
+    before = datetime.now(UTC)
+    (record,) = _emit(capsys, "t.stamp")
+    after = datetime.now(UTC)
+
+    stamped = datetime.fromisoformat(record["@timestamp"])
+    assert before <= stamped <= after
+    # Microsecond precision is the processor's; ecs_logging truncates to millis.
+    assert len(record["@timestamp"].split(".")[1]) > 4
