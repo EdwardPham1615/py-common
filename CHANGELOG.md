@@ -8,6 +8,59 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `protected_router(auth, ...)` and `internal_router(settings, ...)` build an
+  `APIRouter` whose routes are authenticated as a family, nested routers
+  included, and whose requirement reaches the OpenAPI document so Swagger's
+  Authorize button works. Authentication belongs on the router because the only
+  realistic mistake is forgetting it, which publishes an endpoint with nothing
+  failing to say so.
+- A composable authorization algebra — `HasRole`, `HasScope`, `Custom`, combined
+  with `|` and `&` — passed to `Auth.requires(...)` on the route that needs it.
+  `require_roles` and a hypothetical `require_scopes` could never between them
+  express `role OR scope`; this can. A failed check answers 403 naming the rule.
+- `TokenClaims.scopes` (from the standard `scope` claim) and `TokenClaims.roles`
+  (realm and client roles as one set).
+- `HTTP__INTERNAL_API_KEY` guards `internal_router` with an `X-API-Key` header.
+  Unset installs no check, which the router logs at construction.
+- `pycommon.testing.routes.assert_routes_protected(app, ...)` fails a consuming
+  service's test suite, naming every operation that declares no security scheme.
+  Requires the `http` extra.
+- `issue_test_token(..., scopes=[...])`.
+
+### Changed
+
+- **BREAKING** — `create_auth_deps(validator)` is replaced by `Auth`. There is
+  no shim; the import fails loudly.
+
+  ```python
+  # before
+  get_current_user, require_roles = create_auth_deps(validator)
+
+  @app.get("/me", dependencies=[Depends(get_current_user)])
+  async def me(): ...
+
+  # after
+  auth = Auth(validator)
+  api = protected_router(auth, prefix="/api/v1")
+
+  @api.get("/me")
+  async def me(): ...
+  ```
+
+  `auth.current_user` and `auth.require_roles(...)` behave as the old pair did,
+  so a service that prefers per-route dependencies can keep them and only swap
+  how they are obtained.
+
+- `security.keycloak._unauthorized` is now public as `unauthorized`, so both
+  auth paths raise the same 401.
+- A 403 now names the requirement that failed
+  (`Insufficient permissions; requires: role:admin`) instead of a bare
+  "Insufficient permissions". This tells an authenticated caller what the policy
+  is — deliberate, on the grounds that an undebuggable 403 costs more on an
+  internal platform.
+
 ## [0.1.0] - 2026-09-13
 
 First release. pycommon is the shared platform layer for internal FastAPI

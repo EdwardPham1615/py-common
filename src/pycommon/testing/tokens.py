@@ -48,6 +48,7 @@ def issue_test_token(
     sub: str = "test-user",
     realm_roles: list[str] | None = None,
     client_roles: dict[str, list[str]] | None = None,
+    scopes: list[str] | None = None,
     expires_in_seconds: int = 300,
     extra_claims: dict[str, Any] | None = None,
 ) -> str:
@@ -63,6 +64,9 @@ def issue_test_token(
         "resource_access": {
             client: {"roles": roles} for client, roles in (client_roles or {}).items()
         },
+        # Space-separated, as RFC 6749 defines it -- a list here would parse to
+        # no scopes at all and make a test pass for the wrong reason.
+        **({"scope": " ".join(scopes)} if scopes else {}),
         **(extra_claims or {}),
     }
     return jwt.encode(

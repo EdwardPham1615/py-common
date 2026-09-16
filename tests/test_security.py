@@ -1,4 +1,4 @@
-"""Keycloak token validation, RBAC dependencies, and service-to-service tokens."""
+"""Keycloak token validation, the Auth dependencies, and service-to-service tokens."""
 
 from __future__ import annotations
 
@@ -17,10 +17,10 @@ from fastapi.testclient import TestClient
 
 from pycommon.config import KeycloakSettings
 from pycommon.security import (
+    Auth,
     ClientCredentialsTokenProvider,
     KeycloakTokenValidator,
     TokenClaims,
-    create_auth_deps,
 )
 from pycommon.testing.tokens import RsaKeyPair, generate_rsa_keypair, issue_test_token
 
@@ -228,7 +228,7 @@ async def test_fetch_openid_config_raises_on_error_status() -> None:
 
 
 def _auth_app(keypair: RsaKeyPair) -> FastAPI:
-    get_current_user, require_roles = create_auth_deps(_validator_with_key(keypair))
+    auth = Auth(_validator_with_key(keypair))
     app = FastAPI()
 
     # Depends() in a parameter default is FastAPI's own API (the reason
@@ -236,18 +236,18 @@ def _auth_app(keypair: RsaKeyPair) -> FastAPI:
     # the claims object; the role-gated routes assert on status codes, so they
     # take the dependency the way tests/test_cache.py does.
     @app.get("/me")
-    async def me(user: TokenClaims = Depends(get_current_user)) -> dict[str, str]:  # noqa: B008
+    async def me(user: TokenClaims = Depends(auth.current_user)) -> dict[str, str]:  # noqa: B008
         return {"sub": user.sub}
 
-    @app.get("/admin", dependencies=[Depends(require_roles("admin"))])
+    @app.get("/admin", dependencies=[Depends(auth.require_roles("admin"))])
     async def admin() -> dict[str, str]:
         return {"ok": "yes"}
 
-    @app.get("/both", dependencies=[Depends(require_roles("admin", "auditor", any_of=False))])
+    @app.get("/both", dependencies=[Depends(auth.require_roles("admin", "auditor", any_of=False))])
     async def both() -> dict[str, str]:
         return {"ok": "yes"}
 
-    @app.get("/billing", dependencies=[Depends(require_roles("billing"))])
+    @app.get("/billing", dependencies=[Depends(auth.require_roles("billing"))])
     async def billing() -> dict[str, str]:
         return {"ok": "yes"}
 
@@ -289,6 +289,30 @@ def test_invalid_token_is_rejected_by_the_dependency(keypair: RsaKeyPair) -> Non
     response = TestClient(_auth_app(keypair)).get("/me", headers=_bearer_headers(expired))
 
     assert response.status_code == 401
+
+
+def test_scopes_are_split_out_of_the_standard_scope_claim(keypair: RsaKeyPair) -> None:
+    """RFC 6749 makes ``scope`` a single space-separated string, not a list.
+
+    Carrying it through unsplit would make ``HasScope`` match only a caller
+    whose entire scope string equalled the one value asked for -- which is to
+    say, almost nobody, and with nothing failing to explain why.
+    """
+    token = issue_test_token(
+        keypair,
+        issuer=KC.issuer,
+        audience=KC.client_id,
+        scopes=["openid", "orders:write"],
+    )
+    claims = _validator_with_key(keypair).decode(token)
+
+    assert claims.scopes == ["openid", "orders:write"]
+
+
+def test_a_token_without_scopes_yields_none_rather_than_failing(keypair: RsaKeyPair) -> None:
+    token = issue_test_token(keypair, issuer=KC.issuer, audience=KC.client_id)
+
+    assert _validator_with_key(keypair).decode(token).scopes == []
 
 
 def test_realm_role_grants_access(keypair: RsaKeyPair) -> None:
@@ -339,7 +363,9 @@ def test_missing_role_is_forbidden_not_unauthorized(keypair: RsaKeyPair) -> None
     response = TestClient(_auth_app(keypair)).get("/admin", headers=_bearer_headers(token))
 
     assert response.status_code == 403
-    assert response.json()["detail"] == "Insufficient permissions"
+    # The rule that failed is named, so a 403 can be debugged from the response
+    # instead of by reading the route.
+    assert response.json()["detail"] == "Insufficient permissions; requires: role:admin"
 
 
 def test_any_of_false_requires_every_role(keypair: RsaKeyPair) -> None:
