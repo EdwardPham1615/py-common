@@ -1,4 +1,4 @@
-"""Keycloak OIDC JWT validation and RBAC helpers."""
+"""Keycloak OIDC JWT validation: the token validator and the claims it yields."""
 
 from __future__ import annotations
 
@@ -10,28 +10,53 @@ from typing import Any
 import anyio.to_thread
 import httpx
 import jwt
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import HTTPException, status
 from jwt import PyJWKClient
 from jwt.exceptions import PyJWKClientError
 from pydantic import BaseModel, Field
 
 from pycommon.config import KeycloakSettings
 
-_bearer = HTTPBearer(auto_error=False)
-
 
 class TokenClaims(BaseModel):
+    """The parts of a validated access token this library reasons about.
+
+    Two axes, and they answer different questions. ``roles`` is *who* the caller
+    is allowed to be — it belongs to the user (or to a service account, which
+    Keycloak gives client roles exactly like a person). ``scopes`` is *what the
+    client application* may ask for on the caller's behalf. A delegated token is
+    correctly checked against both; neither substitutes for the other.
+
+    Anything else a deployment puts in its tokens is reachable through
+    :attr:`raw`, which is what :class:`~pycommon.security.requirements.Custom`
+    exists to read.
+    """
+
     sub: str
     email: str | None = None
     preferred_username: str | None = None
     name: str | None = None
     realm_roles: list[str] = Field(default_factory=list)
     client_roles: list[str] = Field(default_factory=list)
+    # From the standard OAuth2 ``scope`` claim, split on whitespace. Needs no
+    # configuration: every Keycloak access token carries it.
+    scopes: list[str] = Field(default_factory=list)
     raw: dict[str, Any] = Field(default_factory=dict)
 
+    @property
+    def roles(self) -> set[str]:
+        """Realm and client roles as one set.
 
-def _unauthorized(detail: str = "Invalid or expired token") -> HTTPException:
+        Naming the union rather than introducing it: authorization has always
+        been decided against both lists together, so the realm/client split has
+        never reached a decision. Code that needs the distinction still has both
+        fields.
+        """
+        return set(self.realm_roles) | set(self.client_roles)
+
+
+def unauthorized(detail: str = "Invalid or expired token") -> HTTPException:
+    """A 401 carrying the bearer challenge, so every rejection looks the same."""
     return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail=detail,
@@ -90,13 +115,19 @@ class KeycloakTokenValidator:
             try:
                 payload = self._decode_once(token, force_refresh=True)
             except jwt.PyJWTError as retry_exc:
-                raise _unauthorized() from retry_exc
+                raise unauthorized() from retry_exc
         except jwt.PyJWTError as exc:
-            raise _unauthorized() from exc
+            raise unauthorized() from exc
 
         realm_access = payload.get("realm_access") or {}
         resource_access = payload.get("resource_access") or {}
         client_roles = (resource_access.get(self.settings.client_id) or {}).get("roles") or []
+
+        # The scope claim is a single space-separated string, not a list --
+        # RFC 6749 section 3.3. A token without one yields no scopes rather
+        # than failing: plenty of valid tokens carry none.
+        scope_claim = payload.get("scope")
+        scopes = scope_claim.split() if isinstance(scope_claim, str) else []
 
         return TokenClaims(
             sub=payload["sub"],
@@ -105,6 +136,7 @@ class KeycloakTokenValidator:
             name=payload.get("name"),
             realm_roles=list(realm_access.get("roles") or []),
             client_roles=list(client_roles),
+            scopes=scopes,
             raw=payload,
         )
 
@@ -118,30 +150,3 @@ class KeycloakTokenValidator:
             resp.raise_for_status()
             result: dict[str, Any] = resp.json()
             return result
-
-
-def create_auth_deps(validator: KeycloakTokenValidator) -> tuple[Any, Any]:
-    """Return (get_current_user, require_roles) FastAPI dependencies bound to validator."""
-
-    async def get_current_user(
-        credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
-    ) -> TokenClaims:
-        if credentials is None or credentials.scheme.lower() != "bearer":
-            raise _unauthorized("Not authenticated")
-        return await validator.decode_async(credentials.credentials)
-
-    def require_roles(*roles: str, any_of: bool = True) -> Any:
-        async def _checker(user: TokenClaims = Depends(get_current_user)) -> TokenClaims:
-            user_roles = set(user.realm_roles) | set(user.client_roles)
-            required = set(roles)
-            ok = bool(user_roles & required) if any_of else required.issubset(user_roles)
-            if not ok:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Insufficient permissions",
-                )
-            return user
-
-        return _checker
-
-    return get_current_user, require_roles

@@ -114,7 +114,7 @@ without gating it behind an extra.
 | `logging` | ECS JSON via `structlog` + `ecs-logging`, correlated with OTel trace/span IDs |
 | `telemetry` | OTel bootstrap (traces + metrics), instrumentors, shutdown/flush, opt-in `enable_profiler` |
 | `errors` | `ErrorCode` + `AppError` factories → RFC 9457 Problem Details |
-| `security` | Keycloak JWT/JWKS validation, RBAC deps, `client_credentials` token provider |
+| `security` | Keycloak JWT/JWKS validation, `Auth` (authn deps + `protected_router`/`internal_router`), composable authorization requirements, `client_credentials` token provider |
 | `storage` | S3-compatible `ObjectStorageClient` (`aioboto3`, long-lived client) |
 | `http` | Problem Details handlers + `/problems` docs, `ApiResponse` envelope, pagination, health, httpx client factory |
 | `http.middleware` | Request-ID/trace context, security headers, access log, RED metrics, opt-in gzip, `apply_standard_middleware`, rate-limit dependency |
@@ -122,7 +122,7 @@ without gating it behind an extra.
 | `runtime` | FastAPI app shell, lifespan composer, gRPC server + client channel pool (request-id interceptors), uvicorn runner |
 | `persistence` | Engine/sessionmaker, structured query logging, `Base` + naming convention, thin Alembic helpers, `Repository`/`UnitOfWork` |
 | `utils` | `retry_async` (tenacity), `new_nanoid`/`new_uuid7`, `Clock`/`FixedClock`, `AsyncCircuitBreaker` |
-| `testing` | `FakeUnitOfWork`, `InMemoryRepository`, JWT test-token factory — the in-memory doubles this library ships for *consumers* to test against |
+| `testing` | `FakeUnitOfWork`, `InMemoryRepository`, JWT test-token factory, `assert_routes_protected` — the doubles and assertions this library ships for *consumers* to test against |
 | `lifecycle` (top-level module) | Process-wide draining flag (`begin_draining`/`is_draining`/`reset_draining`), shared by the HTTP and gRPC layers so both stop accepting traffic together. The only thing `pycommon/__init__.py` re-exports besides `__version__`. |
 
 Read README.md's "Quick usage" and per-topic sections
@@ -209,6 +209,33 @@ code, so treat these as closed unless something new contradicts them:
   handler's lifetime. Binding in `intercept_service` again reintroduces the
   leak.
 
+- **Auth is dependencies on routers, never middleware.** Middleware runs before
+  routing, so its exemption list can only be path patterns — the classic bypass
+  surface. An `HTTPException` raised in middleware never reaches FastAPI's
+  handlers (they live inside the router), so its 401 would not be
+  `problem+json`, would carry no `X-Request-ID` and would miss the access log;
+  raised from a dependency it does all three. Middleware is also invisible to
+  OpenAPI and cannot inject `TokenClaims` into a handler signature. All three
+  were verified against this stack, not assumed.
+
+- **Authentication attaches to the router, authorization to the route.**
+  Authentication is uniform across a family of routes and the only realistic
+  mistake is forgetting it, which publishes an endpoint silently — so
+  `protected_router` puts it where routes inherit it, nested routers included.
+  Authorization has no correct default, so it is written per endpoint and read
+  in review; wrapping it into a router would breed one router per combination of
+  rights. Don't add a `role_router`, and don't add a `public_router` — that is
+  `APIRouter` with a different name.
+
+- **There is no `HasPermission`, and no `KEYCLOAK__PERMISSIONS_CLAIM`.**
+  Keycloak emits no permission claim by default, so both would be surface with
+  nothing consuming them and the primitive would return `False` in every default
+  deployment. Fine-grained rights are client roles in Keycloak
+  (`HasRole("orders:write")`), and a deployment with its own mapper has
+  `Custom(fn, ...)` reading `claims.raw`. Role and scope stay distinct because
+  they answer different questions — who the caller is, versus what the client
+  application may do on their behalf.
+
 - **Bulkhead / concurrency limiting is not wanted here.** It was considered
   and dropped, not deferred: don't propose it as a gap, don't add a
   `ConcurrencyLimitMiddleware`, and don't add a semaphore primitive to `utils`
@@ -248,7 +275,7 @@ code, so treat these as closed unless something new contradicts them:
   docstring (`persistence/unit_of_work.py:13-14`) states the limitation it
   would close — cross-engine coordination is out of scope, and callers are told
   to document that until a saga/outbox exists.
-- Coverage sits at ~91.7% against an 85% floor. Every module is above 90% and
+- Coverage sits at ~92% against an 85% floor. Every module is above 90% and
   eight are at 100%, so a large untested addition now stands out in the diff
   long before it reaches the floor.
 

@@ -55,7 +55,7 @@ Example: `uv add "pycommon[http,persistence,runtime] @ git+https://github.com/Ed
 | `logging` | ECS JSON via `structlog` + `ecs-logging` + OTel correlation |
 | `telemetry` | OpenTelemetry bootstrap (traces + metrics) + instrumentors + shutdown/flush + opt-in `enable_profiler` |
 | `errors` | `ErrorCode` + `AppError` factories → RFC 9457 Problem Details with `type` URI + `error_code` |
-| `security` | Keycloak JWT/JWKS validation, RBAC deps, `client_credentials` token provider |
+| `security` | Keycloak JWT/JWKS validation, `Auth` deps + router factories, composable authorization requirements, `client_credentials` token provider |
 | `storage` | S3-compatible `ObjectStorageClient` (`aioboto3`, long-lived client) |
 | `http` | Problem Details + handlers + `/problems` docs, `ApiResponse` envelope, pagination, health, httpx client |
 | `http.middleware` | Request-ID/trace context, security headers, access log, RED metrics, `apply_standard_middleware`, rate-limit dependency |
@@ -63,7 +63,7 @@ Example: `uv add "pycommon[http,persistence,runtime] @ git+https://github.com/Ed
 | `runtime` | FastAPI shell, lifespan composer, gRPC server + client channel pool (request-id interceptors), uvicorn runner |
 | `persistence` | Engine/sessionmaker, structured query logging, `Base` + naming convention, Alembic helpers, `Repository` / `UnitOfWork` |
 | `utils` | `retry_async` (tenacity), `new_nanoid` / `new_uuid7`, `Clock` / `FixedClock`, `AsyncCircuitBreaker` |
-| `testing` | `FakeUnitOfWork`, `InMemoryRepository`, JWT test-token factory |
+| `testing` | `FakeUnitOfWork`, `InMemoryRepository`, JWT test-token factory, `assert_routes_protected` |
 
 ## Configuration and environments
 
@@ -403,6 +403,122 @@ from pycommon.errors import AppError
 raise AppError.input("Order 42 does not exist")
 # → application/problem+json with type=/problems/input, error_code=3, status=400
 ```
+
+## Route protection
+
+Two layers, attached at two different places, because they fail in two different
+ways.
+
+**Authentication goes on the router.** Every endpoint under `/api/v1` wants a
+valid JWT; there is no interesting per-route decision, and the only realistic
+mistake is forgetting one — which publishes an endpoint with nothing failing to
+say so. Putting it on the router means routes inherit it structurally, nested
+routers included.
+
+**Authorization goes on the route.** There is no correct default for "who may
+delete this", so it is written where it applies and read in review. Folding it
+into a router would breed a router per combination of rights and turn a decision
+into something inherited without being reread.
+
+```python
+from fastapi import APIRouter, Depends
+from pycommon.security import (
+    Auth, HasRole, HasScope, KeycloakTokenValidator,
+    TokenClaims, internal_router, protected_router,
+)
+
+auth = Auth(KeycloakTokenValidator(settings.keycloak))
+
+api      = protected_router(auth, prefix="/api/v1", tags=["api"])
+internal = internal_router(settings, prefix="/internal", tags=["internal"])
+public   = APIRouter(prefix="/api/public/v1", tags=["public"])
+
+@api.get("/me")                                    # authentication only
+async def me(user: TokenClaims = Depends(auth.current_user)):
+    return {"sub": user.sub}
+
+@api.delete("/users/{uid}", dependencies=[Depends(auth.require_roles("admin"))])
+async def delete_user(uid: str): ...
+
+@api.post("/orders", dependencies=[Depends(auth.requires(
+    HasRole("admin") | HasScope("orders:write")))])
+async def create_order(): ...
+```
+
+A public router is a plain `APIRouter` — there is nothing for this library to
+add, and a wrapper would only be a name.
+
+### Requirements
+
+| | |
+|---|---|
+| `HasRole("a", "b")` | holds any one of these roles (realm or client) |
+| `HasScope("x", "y")` | token carries any one of these OAuth2 scopes |
+| `Custom(fn, "why")` | any predicate over the claims, including `claims.raw` |
+| `a \| b` / `a & b` | combine them; nest freely |
+
+Each primitive takes several values meaning *any of these*; the operators join
+different kinds. That composition is the point — `require_roles` and a
+hypothetical `require_scopes` could never between them express `role OR scope`,
+and one more function per axis never fixes that.
+
+A failed check answers 403 naming the rule
+(`Insufficient permissions; requires: role:admin OR scope:orders:write`). That
+does tell an authenticated caller what the policy is: a deliberate trade, on the
+grounds that a 403 nobody can debug costs more here than the rule being known to
+someone who already holds a token.
+
+There is no negation. "Anyone except …" is a denial list, and denial lists fail
+open the moment someone adds a role nobody thought about.
+
+**Role and scope are not interchangeable.** A role says *who* the caller is — it
+belongs to the user, or to a service account, which Keycloak gives client roles
+just like a person. A scope says *what the client application* may do on their
+behalf. A delegated token is correctly checked against both. Fine-grained rights
+are usually modelled as client roles in Keycloak, so `HasRole("orders:write")`
+is ordinary rather than a misuse — and there is deliberately no `HasPermission`,
+because Keycloak emits no permission claim of its own and a deployment that maps
+one has `Custom` to read it.
+
+### Internal routes
+
+`internal_router` installs an `X-API-Key` check when `HTTP__INTERNAL_API_KEY` is
+set, and installs nothing when it is not — reasonable when the network already
+keeps those routes unreachable, but a decision rather than an accident, so it is
+logged at construction and reported by the audit below.
+
+### Proving it
+
+Forgetting is the failure this design is shaped around, so check it in the
+service's own suite:
+
+```python
+from pycommon.testing.routes import PYCOMMON_PUBLIC_PREFIXES, assert_routes_protected
+
+def test_no_route_is_accidentally_public():
+    assert_routes_protected(
+        build_app(),
+        public_prefixes=("/api/public/v1", *PYCOMMON_PUBLIC_PREFIXES),
+    )
+```
+
+It reads the OpenAPI document and fails naming every operation that declares no
+security scheme. Two things it does not do: it says nothing about
+*authorization* (a route that authenticates but forgets its `requires` passes —
+there is no default rule to compare against), and it only sees protection that
+declares a scheme, so a route guarded by a plain dependency has to be listed.
+
+### Why this is not middleware
+
+Middleware is the obvious first idea and it is wrong four times over. It runs
+*before* routing, so exemptions can only be path patterns — the classic bypass
+surface. An `HTTPException` raised in middleware never reaches FastAPI's
+handlers, which live inside the router, so its 401 would not be `problem+json`,
+would carry no request ID, and would miss the access log; raised from a
+dependency it does all three. Middleware is invisible to OpenAPI, so Swagger's
+Authorize button and the documented 401 both disappear. And it cannot inject
+`TokenClaims` into a handler signature — claims would travel through
+`request.state`, untyped.
 
 ## Error contract
 

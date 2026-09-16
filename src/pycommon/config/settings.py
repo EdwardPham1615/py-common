@@ -82,6 +82,14 @@ class HttpSettings(BaseModel):
     # it, not because a middleware reads it.
     problem_type_base_url: str | None = None
 
+    # Shared secret guarding the routes built by
+    # :func:`~pycommon.security.auth.internal_router`, sent as ``X-API-Key``.
+    # Unset installs no check at all: internal routes are then protected by the
+    # network and nothing else. That is a defensible choice inside a closed
+    # cluster, but it has to be a choice -- ``assert_routes_protected`` names
+    # those routes rather than letting them pass quietly.
+    internal_api_key: str | None = None
+
 
 class CorsSettings(BaseModel):
     """Browser CORS policy — env keys ``CORS__ORIGINS``, ``CORS__ALLOW_METHODS``, etc.

@@ -44,16 +44,23 @@ def test_import_telemetry() -> None:
 
 def test_import_security() -> None:
     from pycommon.security import (
+        Auth,
         ClientCredentialsTokenProvider,
+        HasRole,
+        HasScope,
         KeycloakTokenValidator,
         TokenClaims,
-        create_auth_deps,
+        internal_router,
+        protected_router,
     )
 
     assert TokenClaims is not None
     assert KeycloakTokenValidator is not None
     assert ClientCredentialsTokenProvider is not None
-    assert callable(create_auth_deps)
+    assert Auth is not None
+    assert callable(protected_router)
+    assert callable(internal_router)
+    assert (HasRole("a") | HasScope("b")).describe() == "role:a OR scope:b"
 
 
 def test_import_storage() -> None:
