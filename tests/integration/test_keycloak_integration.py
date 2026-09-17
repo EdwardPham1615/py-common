@@ -95,7 +95,13 @@ def test_a_real_user_token_decodes_and_its_roles_are_where_we_look(
     assert claims.roles == {"admin", "orders:write"}
     # Keycloak sends `scope` as one space-separated string; this is the split
     # working against the real thing rather than against our own factory.
-    assert claims.scopes == ["profile", "email"]
+    #
+    # As a set, because Keycloak does not promise an order and does not keep
+    # one -- the same realm answered "profile email" locally and "email
+    # profile" in CI. `HasScope` intersects sets, so order is not something
+    # this library relies on, and a test that pinned it would only be a flake
+    # waiting for the next run.
+    assert set(claims.scopes) == {"profile", "email"}
 
 
 # --- audience: what it actually means --------------------------------------
