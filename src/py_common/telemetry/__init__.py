@@ -5,11 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from opentelemetry import trace
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.sdk.trace.sampling import ParentBasedTraceIdRatio
 
 from py_common.logging import get_logger
 from py_common.telemetry.metrics import (
@@ -21,6 +16,7 @@ from py_common.telemetry.profiler import enable_profiler
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
+    from opentelemetry.sdk.trace import TracerProvider
 
 logger = get_logger(__name__)
 
@@ -76,6 +72,19 @@ def setup_telemetry(
         export_interval_ms=metrics_export_interval_ms,
         prometheus=prometheus_metrics,
     )
+
+    # Imported here rather than at module scope. `opentelemetry.exporter` and
+    # the SDK belong to the `telemetry` extra, but this file is executed
+    # whenever anything touches `py_common.telemetry.metrics` -- which the
+    # HTTP and gRPC metrics middleware do, from extras that never asked for
+    # the SDK. metrics.py's own docstring promises importing it "never
+    # forces the SDK on a caller"; this is what keeps that true. The
+    # instrumentor imports below already worked this way.
+    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    from opentelemetry.sdk.trace.sampling import ParentBasedTraceIdRatio
 
     if _provider is None:
         resource = Resource.create(

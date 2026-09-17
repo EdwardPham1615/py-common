@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from importlib import import_module
+from typing import TYPE_CHECKING, Any
 
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
@@ -11,11 +12,6 @@ from py_common.http.middleware.body_limit import (
     DEFAULT_MAX_BODY_BYTES,
     BodySizeLimitMiddleware,
     BodyTooLarge,
-)
-from py_common.http.middleware.idempotency import (
-    IDEMPOTENCY_HEADER,
-    REPLAY_HEADER,
-    IdempotencyMiddleware,
 )
 from py_common.http.middleware.metrics import MetricsMiddleware
 from py_common.http.middleware.request_context import (
@@ -37,6 +33,36 @@ if TYPE_CHECKING:
     from redis.asyncio import Redis
 
     from py_common.config import BaseAppSettings
+    from py_common.http.middleware.idempotency import (
+        IDEMPOTENCY_HEADER as IDEMPOTENCY_HEADER,
+    )
+    from py_common.http.middleware.idempotency import (
+        REPLAY_HEADER as REPLAY_HEADER,
+    )
+    from py_common.http.middleware.idempotency import (
+        IdempotencyMiddleware as IdempotencyMiddleware,
+    )
+
+# Resolved on first access rather than imported here. `idempotency` is the one
+# module under this package that reaches outside the `http` extra -- it needs
+# `redis`, which lives in `cache` -- and importing it eagerly made
+# `py_common.http.middleware` unimportable for anyone who installed exactly what
+# the README says: `py-common[http]`. That shipped in 0.2.0, and it took out
+# `apply_standard_middleware`, the entry point the whole module exists for.
+_LAZY: dict[str, str] = {
+    "IDEMPOTENCY_HEADER": "py_common.http.middleware.idempotency",
+    "REPLAY_HEADER": "py_common.http.middleware.idempotency",
+    "IdempotencyMiddleware": "py_common.http.middleware.idempotency",
+}
+
+
+def __getattr__(name: str) -> Any:
+    """PEP 562 hook: resolve the idempotency re-exports on first access."""
+    module = _LAZY.get(name)
+    if module is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    return getattr(import_module(module), name)
+
 
 __all__ = [
     "API_CONTENT_SECURITY_POLICY",
@@ -97,6 +123,10 @@ def apply_standard_middleware(
     # size check has to have run already -- installing it outside the body limit
     # would let an unbounded body be buffered here before anything measured it.
     if redis is not None:
+        # Imported here, not at module scope: this is the only path that needs
+        # `redis`, and a service without the `cache` extra never reaches it.
+        from py_common.http.middleware.idempotency import IdempotencyMiddleware
+
         app.add_middleware(
             IdempotencyMiddleware,
             redis=redis,

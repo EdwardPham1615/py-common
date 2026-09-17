@@ -1,4 +1,4 @@
-.PHONY: help install sync lint format format-check typecheck test test-cov test-integration \
+.PHONY: help install sync lint format format-check typecheck test test-cov test-integration extras-check \
 	test-integration-local infra-up infra-down infra-logs audit check pre-commit clean
 
 UV ?= uv
@@ -83,6 +83,9 @@ keycloak-export: ## Dump the RUNNING Keycloak realm to /tmp, to diff against the
 		'http://localhost:8080/admin/realms/pycommon-test/partial-export?exportClients=true&exportGroupsAndRoles=true' \
 		| python3 -m json.tool > /tmp/pycommon-keycloak-realm.json && \
 	echo "wrote /tmp/pycommon-keycloak-realm.json ($$(wc -l < /tmp/pycommon-keycloak-realm.json) lines)"
+
+extras-check: ## Install each extra alone and import what it promises (slow; CI runs it)
+	./scripts/check-extras-isolation.sh
 
 audit: ## Audit locked dependencies for known vulnerabilities
 	$(UV) export --frozen --extra all --no-dev --no-emit-project \
