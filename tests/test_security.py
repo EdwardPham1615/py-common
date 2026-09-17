@@ -15,14 +15,14 @@ import pytest
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from pycommon.config import KeycloakSettings
-from pycommon.security import (
+from py_common.config import KeycloakSettings
+from py_common.security import (
     Auth,
     ClientCredentialsTokenProvider,
     KeycloakTokenValidator,
     TokenClaims,
 )
-from pycommon.testing.tokens import RsaKeyPair, generate_rsa_keypair, issue_test_token
+from py_common.testing.tokens import RsaKeyPair, generate_rsa_keypair, issue_test_token
 
 
 @contextlib.contextmanager
@@ -157,7 +157,7 @@ async def test_decode_async(keypair: RsaKeyPair) -> None:
 def test_jwks_client_is_reused_within_the_ttl() -> None:
     validator = KeycloakTokenValidator(settings=KC)
 
-    with patch("pycommon.security.keycloak.PyJWKClient") as client_cls:
+    with patch("py_common.security.keycloak.PyJWKClient") as client_cls:
         first = validator._get_jwks_client()
         second = validator._get_jwks_client()
 
@@ -170,7 +170,7 @@ def test_jwks_client_is_reused_within_the_ttl() -> None:
 def test_jwks_client_is_rebuilt_after_the_ttl() -> None:
     validator = KeycloakTokenValidator(settings=KeycloakSettings(**{**KC.model_dump()}))
 
-    with patch("pycommon.security.keycloak.PyJWKClient") as client_cls:
+    with patch("py_common.security.keycloak.PyJWKClient") as client_cls:
         client_cls.side_effect = [MagicMock(name="first"), MagicMock(name="second")]
         first = validator._get_jwks_client()
         # Pretend the cache was populated longer ago than the TTL allows.
@@ -184,7 +184,7 @@ def test_jwks_client_is_rebuilt_after_the_ttl() -> None:
 def test_forced_refresh_rebuilds_even_inside_the_ttl() -> None:
     validator = KeycloakTokenValidator(settings=KC)
 
-    with patch("pycommon.security.keycloak.PyJWKClient") as client_cls:
+    with patch("py_common.security.keycloak.PyJWKClient") as client_cls:
         client_cls.side_effect = [MagicMock(name="first"), MagicMock(name="second")]
         first = validator._get_jwks_client()
         second = validator._get_jwks_client(force_refresh=True)
@@ -232,7 +232,7 @@ def _auth_app(keypair: RsaKeyPair) -> FastAPI:
     app = FastAPI()
 
     # Depends() in a parameter default is FastAPI's own API (the reason
-    # pyproject already exempts src/pycommon/security from B008). Only /me needs
+    # pyproject already exempts src/py_common/security from B008). Only /me needs
     # the claims object; the role-gated routes assert on status codes, so they
     # take the dependency the way tests/test_cache.py does.
     @app.get("/me")

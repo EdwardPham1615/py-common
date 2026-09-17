@@ -9,9 +9,9 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
-from pycommon.config import BaseAppSettings, HttpSettings
-from pycommon.errors import ErrorCode
-from pycommon.http.middleware import BodySizeLimitMiddleware, apply_standard_middleware
+from py_common.config import BaseAppSettings, HttpSettings
+from py_common.errors import ErrorCode
+from py_common.http.middleware import BodySizeLimitMiddleware, apply_standard_middleware
 
 
 def _app(**kwargs: object) -> FastAPI:

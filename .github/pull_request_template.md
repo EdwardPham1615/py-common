@@ -40,4 +40,4 @@ None.
 - [ ] Tests added that fail without this change
 - [ ] `CHANGELOG.md` updated under `[Unreleased]` (skip for internal refactors and test-only changes)
 - [ ] Breaking changes marked **BREAKING** with a migration note
-- [ ] `pycommon.testing.fakes` updated if an interface changed
+- [ ] `py_common.testing.fakes` updated if an interface changed

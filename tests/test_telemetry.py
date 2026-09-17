@@ -14,7 +14,7 @@ from typing import Any, ClassVar
 import pytest
 from opentelemetry.sdk.trace.sampling import ParentBasedTraceIdRatio
 
-import pycommon.telemetry as tel
+import py_common.telemetry as tel
 
 
 @pytest.fixture(autouse=True)

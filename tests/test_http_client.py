@@ -6,8 +6,8 @@ import httpx
 import pytest
 import structlog
 
-from pycommon.http.client import REQUEST_ID_HEADER, create_http_client
-from pycommon.utils import AsyncCircuitBreaker, CircuitOpenError
+from py_common.http.client import REQUEST_ID_HEADER, create_http_client
+from py_common.utils import AsyncCircuitBreaker, CircuitOpenError
 
 
 class _ScriptedTransport(httpx.AsyncBaseTransport):

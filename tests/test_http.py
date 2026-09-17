@@ -9,9 +9,9 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
-from pycommon.config import BaseAppSettings, HttpSettings
-from pycommon.errors import AppError, ErrorCode
-from pycommon.http import (
+from py_common.config import BaseAppSettings, HttpSettings
+from py_common.errors import AppError, ErrorCode
+from py_common.http import (
     ApiResponse,
     HealthCheck,
     build_health_router,
@@ -20,7 +20,7 @@ from pycommon.http import (
     encode_cursor,
     register_exception_handlers,
 )
-from pycommon.http.middleware import apply_standard_middleware
+from py_common.http.middleware import apply_standard_middleware
 
 
 class _Payload(BaseModel):
@@ -161,7 +161,7 @@ def test_500_is_logged_once_and_recorded_in_access_log(client: TestClient) -> No
 
 def test_exceptions_propagate_when_handling_disabled() -> None:
     """``handle_exceptions=False`` restores plain propagation for callers that want it."""
-    from pycommon.http.middleware import RequestContextMiddleware
+    from py_common.http.middleware import RequestContextMiddleware
 
     app = FastAPI()
 
@@ -190,7 +190,7 @@ def test_validation_error_maps_to_problem_detail(client: TestClient) -> None:
 
 
 def test_http_exception_maps_to_problem_detail_and_keeps_headers(client: TestClient) -> None:
-    """429/401 raised by pycommon's own dependencies must use the shared envelope.
+    """429/401 raised by py_common's own dependencies must use the shared envelope.
 
     Their protocol headers must survive the translation — a 401 without
     ``WWW-Authenticate`` and a 429 without ``Retry-After`` are both malformed.
@@ -370,7 +370,7 @@ def test_cursor_invalid_raises_value_error() -> None:
 
 
 def test_access_log_masks_sensitive_query() -> None:
-    from pycommon.http.middleware.request_context import (
+    from py_common.http.middleware.request_context import (
         DEFAULT_MASK_QUERY_PARAMS,
         _mask_query,
     )
@@ -407,7 +407,7 @@ def test_client_ip_ignores_forwarded_header() -> None:
     address in access logs and rate-limit buckets. Resolving it is the ASGI
     server's job — only it knows which peer is a trusted proxy.
     """
-    from pycommon.http.middleware import client_ip
+    from py_common.http.middleware import client_ip
 
     scope = {
         "type": "http",
@@ -443,7 +443,7 @@ def test_rate_limit_key_uses_same_client_ip_as_access_log() -> None:
     """One definition of "the caller" — a forged header must not open a new bucket."""
     from unittest.mock import MagicMock
 
-    from pycommon.http.middleware.rate_limit import _default_key
+    from py_common.http.middleware.rate_limit import _default_key
 
     def _request(forwarded: str) -> MagicMock:
         request = MagicMock()
@@ -463,7 +463,7 @@ def test_rate_limit_key_uses_same_client_ip_as_access_log() -> None:
 def test_hsts_emitted_when_proxy_reports_https() -> None:
     """HSTS is gated on scope["scheme"], which uvicorn sets from X-Forwarded-Proto
     only once forwarded_allow_ips trusts the peer."""
-    from pycommon.http.middleware import SecurityHeadersMiddleware
+    from py_common.http.middleware import SecurityHeadersMiddleware
 
     app = FastAPI()
 
@@ -483,7 +483,7 @@ def test_hsts_emitted_when_proxy_reports_https() -> None:
 def test_csp_absent_by_default_and_emitted_when_set() -> None:
     """No default: the tight policy an API wants blanks out /docs, and a policy
     loose enough for /docs protects nothing."""
-    from pycommon.http.middleware import API_CONTENT_SECURITY_POLICY, SecurityHeadersMiddleware
+    from py_common.http.middleware import API_CONTENT_SECURITY_POLICY, SecurityHeadersMiddleware
 
     def build(**kwargs: object) -> TestClient:
         app = FastAPI()
@@ -502,8 +502,8 @@ def test_csp_absent_by_default_and_emitted_when_set() -> None:
 
 
 def test_apply_standard_middleware_passes_csp_through() -> None:
-    from pycommon.config import BaseAppSettings
-    from pycommon.http.middleware import apply_standard_middleware
+    from py_common.config import BaseAppSettings
+    from py_common.http.middleware import apply_standard_middleware
 
     app = FastAPI()
 
@@ -526,8 +526,8 @@ def test_problem_request_id_falls_back_to_log_context() -> None:
     is useless for exactly the responses you need to trace."""
     import structlog
 
-    from pycommon.errors import AppError
-    from pycommon.http import app_error_handler
+    from py_common.errors import AppError
+    from py_common.http import app_error_handler
 
     app = FastAPI()
     app.add_exception_handler(AppError, app_error_handler)  # type: ignore[arg-type]
@@ -556,7 +556,7 @@ def test_problem_and_envelope_agree_on_request_id(client: TestClient) -> None:
 def test_security_header_settings_reach_the_middleware() -> None:
     """hsts=False belongs in config, not code: a service behind plain HTTP in a
     dev cluster should not need a different build."""
-    from pycommon.http.middleware import apply_standard_middleware
+    from py_common.http.middleware import apply_standard_middleware
 
     app = FastAPI()
 
@@ -577,7 +577,7 @@ def test_timeout_is_installed_from_settings() -> None:
     argument, so there is one source for the value."""
     import anyio
 
-    from pycommon.http.middleware import apply_standard_middleware
+    from py_common.http.middleware import apply_standard_middleware
 
     app = FastAPI()
 
@@ -601,8 +601,8 @@ def test_cors_settings_reach_the_middleware() -> None:
     """
     from fastapi.middleware.cors import CORSMiddleware
 
-    from pycommon.config import CorsSettings
-    from pycommon.http.middleware import apply_standard_middleware
+    from py_common.config import CorsSettings
+    from py_common.http.middleware import apply_standard_middleware
 
     app = FastAPI()
     apply_standard_middleware(
@@ -636,7 +636,7 @@ def test_cors_origin_from_the_env_prefix_is_honoured(tmp_path: Path) -> None:
     async def ping() -> dict[str, str]:
         return {"ok": "yes"}
 
-    from pycommon.http.middleware import apply_standard_middleware
+    from py_common.http.middleware import apply_standard_middleware
 
     apply_standard_middleware(app, BaseAppSettings(_env_file=env_file))
 

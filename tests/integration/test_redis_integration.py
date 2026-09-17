@@ -9,7 +9,7 @@ import time
 import pytest
 from redis.asyncio import Redis
 
-from pycommon.cache import (
+from py_common.cache import (
     Cache,
     LockAcquireError,
     RedisRateLimiter,
@@ -17,7 +17,7 @@ from pycommon.cache import (
     create_redis,
     redis_lock,
 )
-from pycommon.config import RedisSettings
+from py_common.config import RedisSettings
 
 pytestmark = pytest.mark.integration
 
@@ -228,7 +228,7 @@ async def test_idempotent_replay_against_real_redis(redis_client: Redis) -> None
     import httpx
     from fastapi import FastAPI
 
-    from pycommon.http.middleware import IdempotencyMiddleware
+    from py_common.http.middleware import IdempotencyMiddleware
 
     calls: list[int] = []
     app = FastAPI()
@@ -263,7 +263,7 @@ async def test_concurrent_keys_collapse_to_one_run_on_real_redis(redis_client: R
     import httpx
     from fastapi import FastAPI
 
-    from pycommon.http.middleware import IdempotencyMiddleware
+    from py_common.http.middleware import IdempotencyMiddleware
 
     calls: list[int] = []
     release = asyncio.Event()

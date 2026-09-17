@@ -18,7 +18,7 @@ import structlog
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 
-from pycommon.logging import current_request_id, get_logger, setup_logging
+from py_common.logging import current_request_id, get_logger, setup_logging
 
 
 @pytest.fixture(autouse=True)

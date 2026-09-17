@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, text
 
-from pycommon.config import DatabaseSettings
-from pycommon.persistence.migrations import (
+from py_common.config import DatabaseSettings
+from py_common.persistence.migrations import (
     build_alembic_config,
     current_revision,
     downgrade,

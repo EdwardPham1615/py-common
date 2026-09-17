@@ -11,9 +11,9 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
-from pycommon.config import BaseAppSettings, HttpSettings
-from pycommon.errors import ErrorCode
-from pycommon.http.middleware import TimeoutMiddleware, apply_standard_middleware
+from py_common.config import BaseAppSettings, HttpSettings
+from py_common.errors import ErrorCode
+from py_common.http.middleware import TimeoutMiddleware, apply_standard_middleware
 
 
 @pytest.fixture

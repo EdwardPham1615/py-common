@@ -1,6 +1,11 @@
 repos:
+  # Keep this in step with the `ruff` floor in pyproject.toml. When it drifts,
+  # the hook enforces a different rule set than `make check` and CI: v0.12.0 sat
+  # here while the project ran 0.16.6, and flagged UP038 -- a rule newer ruff
+  # deprecates -- on files the hook happened not to have seen in a while.
+  # `pre-commit autoupdate` moves it; nothing does that automatically.
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.12.0
+    rev: v0.16.6
     hooks:
       - id: ruff
         args: [--fix]

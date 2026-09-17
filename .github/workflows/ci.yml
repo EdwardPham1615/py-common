@@ -140,10 +140,10 @@ jobs:
       - name: Lint
         run: |
           uv run ruff check src tests
-          uv run ruff format --check src tests
+          uv run ruff format --check src tests *.md .github/*.md .github/ISSUE_TEMPLATE/*.md
 
       - name: Typecheck
-        run: uv run mypy src/pycommon
+        run: uv run mypy src/py_common
 
       # Coverage threshold lives in pyproject.toml, so this command and
       # `make test-cov` enforce the same number.
@@ -151,7 +151,7 @@ jobs:
       # unset and those tests skip, so `make test` stays offline;
       # `make test-integration` opts in.
       - name: Test
-        run: uv run pytest --cov=pycommon --cov-report=term-missing
+        run: uv run pytest --cov=py_common --cov-report=term-missing
 
   audit:
     runs-on: ubuntu-latest

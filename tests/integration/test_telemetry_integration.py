@@ -33,9 +33,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from opentelemetry import trace
 
-from pycommon.config import BaseAppSettings
-from pycommon.http.middleware import apply_standard_middleware
-from pycommon.telemetry import setup_telemetry, shutdown_telemetry
+from py_common.config import BaseAppSettings
+from py_common.http.middleware import apply_standard_middleware
+from py_common.telemetry import setup_telemetry, shutdown_telemetry
 
 service_name, endpoint = sys.argv[1], sys.argv[2]
 
@@ -101,7 +101,7 @@ def test_spans_configured_by_setup_telemetry_reach_the_collector(
 ) -> None:
     """The claim the README makes and nothing verified: configure the endpoint,
     and traces show up there."""
-    service_name = f"pycommon-it-{uuid.uuid4().hex[:8]}"
+    service_name = f"py_common-it-{uuid.uuid4().hex[:8]}"
 
     _export(service_name, otlp_endpoint)
     traces = _wait_for_traces(jaeger_query_url, service_name)
@@ -116,7 +116,7 @@ def test_the_service_registers_itself_with_the_collector(
 ) -> None:
     """service.name comes from the Resource setup_telemetry builds. Getting it
     wrong is invisible locally and makes a service unfindable in the UI."""
-    service_name = f"pycommon-it-{uuid.uuid4().hex[:8]}"
+    service_name = f"py_common-it-{uuid.uuid4().hex[:8]}"
 
     _export(service_name, otlp_endpoint)
     _wait_for_traces(jaeger_query_url, service_name)
@@ -131,7 +131,7 @@ def test_served_requests_carry_the_request_id_on_their_span(
     """The correlation story in the README: X-Request-ID is set as the span
     attribute http.request.id, so a log line and a trace can be joined. It is
     asserted here against what the collector actually stored."""
-    service_name = f"pycommon-it-{uuid.uuid4().hex[:8]}"
+    service_name = f"py_common-it-{uuid.uuid4().hex[:8]}"
 
     _export(service_name, otlp_endpoint)
     traces = _wait_for_traces(jaeger_query_url, service_name)

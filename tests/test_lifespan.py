@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from fastapi import FastAPI
 
-from pycommon.runtime import LifespanResource, build_lifespan
+from py_common.runtime import LifespanResource, build_lifespan
 
 
 def _resource(name: str, events: list[str], *, fail_startup: bool = False) -> LifespanResource:

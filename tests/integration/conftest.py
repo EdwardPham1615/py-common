@@ -116,11 +116,11 @@ def storage_settings() -> Any:
     if not endpoint:
         pytest.skip("S3_TEST_ENDPOINT is not set; skipping object-storage integration tests")
 
-    from pycommon.config import StorageSettings
+    from py_common.config import StorageSettings
 
     return StorageSettings(
         endpoint_url=endpoint,
-        access_key=os.getenv("S3_TEST_ACCESS_KEY", "pycommon"),
+        access_key=os.getenv("S3_TEST_ACCESS_KEY", "py_common"),
         secret_key=os.getenv("S3_TEST_SECRET_KEY", "pycommon123"),
         bucket=f"it-{uuid.uuid4().hex[:12]}",
         # MinIO serves virtual-host style only with DNS wildcards; path style is
@@ -164,7 +164,7 @@ def _client_secret(realm: dict[str, Any], client_id: str) -> str:
 @pytest.fixture
 def keycloak_settings(keycloak_url: str, keycloak_realm: dict[str, Any]) -> Any:
     """Settings for the client that *does* carry a dedicated audience mapper."""
-    from pycommon.config import KeycloakSettings
+    from py_common.config import KeycloakSettings
 
     return KeycloakSettings(
         server_url=keycloak_url,
@@ -177,7 +177,7 @@ def keycloak_settings(keycloak_url: str, keycloak_realm: dict[str, Any]) -> Any:
 @pytest.fixture
 def keycloak_settings_noaud(keycloak_url: str, keycloak_realm: dict[str, Any]) -> Any:
     """Settings for the control client, which has no audience mapper."""
-    from pycommon.config import KeycloakSettings
+    from py_common.config import KeycloakSettings
 
     return KeycloakSettings(
         server_url=keycloak_url,
@@ -194,7 +194,7 @@ def keycloak_token(
     """Ask the real server for a token, and hand back the whole response.
 
     Deliberately plain ``httpx`` rather than
-    :class:`~pycommon.security.ClientCredentialsTokenProvider`: that provider is
+    :class:`~py_common.security.ClientCredentialsTokenProvider`: that provider is
     one of the things under test here, so using it to set tests up would let a
     bug in it hide behind itself.
     """

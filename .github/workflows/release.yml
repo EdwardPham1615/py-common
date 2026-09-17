@@ -48,10 +48,10 @@ jobs:
       - name: Lint
         run: |
           uv run ruff check src tests
-          uv run ruff format --check src tests
+          uv run ruff format --check src tests *.md .github/*.md .github/ISSUE_TEMPLATE/*.md
 
       - name: Typecheck
-        run: uv run mypy src/pycommon
+        run: uv run mypy src/py_common
 
       - name: Test
         run: uv run pytest

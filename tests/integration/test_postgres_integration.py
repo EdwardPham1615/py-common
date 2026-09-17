@@ -13,14 +13,14 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from pycommon.persistence import (
+from py_common.persistence import (
     SqlAlchemyRepository,
     SqlAlchemyUnitOfWork,
     install_query_logger,
     paginate_cursor,
 )
-from pycommon.persistence.base import NAMING_CONVENTION
-from pycommon.persistence.mixins import SoftDeleteMixin, TimestampMixin, UUIDv7PrimaryKeyMixin
+from py_common.persistence.base import NAMING_CONVENTION
+from py_common.persistence.mixins import SoftDeleteMixin, TimestampMixin, UUIDv7PrimaryKeyMixin
 
 pytestmark = pytest.mark.integration
 

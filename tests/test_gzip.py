@@ -12,8 +12,8 @@ from fastapi.testclient import TestClient
 from redis.asyncio import Redis
 from starlette.middleware.gzip import GZipMiddleware
 
-from pycommon.config import BaseAppSettings, HttpSettings
-from pycommon.http.middleware import apply_standard_middleware
+from py_common.config import BaseAppSettings, HttpSettings
+from py_common.http.middleware import apply_standard_middleware
 
 # Comfortably above the threshold the tests configure, and repetitive enough
 # that gzip actually shrinks it -- a random payload would not.
@@ -57,7 +57,7 @@ def _app(*, redis: Redis | None = None, **http: object) -> FastAPI:
 
 
 def test_not_installed_by_default() -> None:
-    """Upgrading pycommon must not change a single byte for a service that did
+    """Upgrading py_common must not change a single byte for a service that did
     not ask for compression."""
     client = TestClient(_app())
     response = client.get("/big", headers={"Accept-Encoding": "gzip"})

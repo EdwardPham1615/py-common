@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from pycommon.persistence import SqlAlchemyRepository, SqlAlchemyUnitOfWork, sqlalchemy_repository
+from py_common.persistence import SqlAlchemyRepository, SqlAlchemyUnitOfWork, sqlalchemy_repository
 
 
 class Base(DeclarativeBase):
@@ -113,7 +113,7 @@ async def test_uow_rolls_back_on_error(engine: AsyncEngine) -> None:
 async def test_query_logger_emits_structured_log() -> None:
     from structlog.testing import capture_logs
 
-    from pycommon.persistence.query_logging import install_query_logger
+    from py_common.persistence.query_logging import install_query_logger
 
     engine = create_async_engine("sqlite+aiosqlite://")
     install_query_logger(engine, slow_query_threshold_ms=0.0)
@@ -132,7 +132,7 @@ async def test_query_logger_emits_structured_log() -> None:
 async def test_query_logger_threshold_skips_fast_queries() -> None:
     from structlog.testing import capture_logs
 
-    from pycommon.persistence.query_logging import install_query_logger
+    from py_common.persistence.query_logging import install_query_logger
 
     engine = create_async_engine("sqlite+aiosqlite://")
     install_query_logger(engine, slow_query_threshold_ms=60_000.0)
@@ -147,8 +147,8 @@ async def test_query_logger_threshold_skips_fast_queries() -> None:
 async def test_migration_lifespan_skips_when_disabled() -> None:
     from structlog.testing import capture_logs
 
-    from pycommon.config import DatabaseSettings
-    from pycommon.persistence import migration_lifespan_resource
+    from py_common.config import DatabaseSettings
+    from py_common.persistence import migration_lifespan_resource
 
     settings = DatabaseSettings(auto_migrate=False)
     resource = migration_lifespan_resource(settings)
@@ -161,7 +161,7 @@ async def test_query_logger_logs_failed_queries() -> None:
     """Failing queries are the ones worth seeing — they used to be logged not at all."""
     from structlog.testing import capture_logs
 
-    from pycommon.persistence.query_logging import install_query_logger
+    from py_common.persistence.query_logging import install_query_logger
 
     engine = create_async_engine("sqlite+aiosqlite://")
     # High threshold: failures must be reported regardless of how fast they fail.
@@ -186,7 +186,7 @@ async def test_query_logger_does_not_leak_timings_on_failure() -> None:
     connection-scoped stack grew by one entry per failure for the whole life of
     the connection and could mis-pair later measurements.
     """
-    from pycommon.persistence.query_logging import install_query_logger
+    from py_common.persistence.query_logging import install_query_logger
 
     engine = create_async_engine("sqlite+aiosqlite://")
     install_query_logger(engine)
@@ -202,7 +202,7 @@ async def test_query_logger_does_not_leak_timings_on_failure() -> None:
 
 async def test_pk_column_is_resolved_once_per_model(session: AsyncSession) -> None:
     """Every get()/delete() used to re-inspect the mapper for a fixed answer."""
-    from pycommon.persistence.sqlalchemy_repository import SqlAlchemyRepository
+    from py_common.persistence.sqlalchemy_repository import SqlAlchemyRepository
 
     SqlAlchemyRepository._pk_columns.pop(Item, None)
     calls = 0
@@ -225,16 +225,16 @@ async def test_pk_column_is_resolved_once_per_model(session: AsyncSession) -> No
 
 
 def test_driver_named_by_the_dsn_is_installed() -> None:
-    """`uv add "pycommon[persistence]"` must be enough to build an engine. The
+    """`uv add "py-common[persistence]"` must be enough to build an engine. The
     DSN hardcodes postgresql+asyncpg, so the extra owes the caller that driver."""
-    from pycommon.config import DatabaseSettings
+    from py_common.config import DatabaseSettings
 
     assert DatabaseSettings().async_dsn.startswith("postgresql+asyncpg://")
     import asyncpg  # noqa: F401
 
 
 async def test_in_memory_repository_orders_like_the_real_one() -> None:
-    from pycommon.testing.fakes import InMemoryRepository
+    from py_common.testing.fakes import InMemoryRepository
 
     @dataclass
     class Row:
@@ -254,7 +254,7 @@ async def test_in_memory_repository_orders_like_the_real_one() -> None:
 
 
 async def test_in_memory_repository_default_ordering() -> None:
-    from pycommon.testing.fakes import InMemoryRepository
+    from py_common.testing.fakes import InMemoryRepository
 
     @dataclass
     class Row:
@@ -270,7 +270,7 @@ async def test_in_memory_repository_default_ordering() -> None:
 
 async def test_in_memory_repository_rejects_a_column_expression() -> None:
     """Ignoring it would leave the page unsorted and the assertion meaningless."""
-    from pycommon.testing.fakes import InMemoryRepository
+    from py_common.testing.fakes import InMemoryRepository
 
     repo: InMemoryRepository[Item, int] = InMemoryRepository(id_attr="item_id")
     with pytest.raises(TypeError, match="attribute name"):
@@ -285,8 +285,8 @@ def test_pool_settings_reach_the_engine() -> None:
     Asserted on a real engine's pool rather than on the kwargs passed to
     create_async_engine: mocking that call proves only that we said the words.
     """
-    from pycommon.config import DatabaseSettings
-    from pycommon.persistence.engine import create_engine_and_sessionmaker
+    from py_common.config import DatabaseSettings
+    from py_common.persistence.engine import create_engine_and_sessionmaker
 
     settings = DatabaseSettings(
         pool_size=7,
@@ -309,7 +309,7 @@ async def test_database_lifespan_resource_connects_then_disposes() -> None:
     first request, and shutdown returns the pool's sockets."""
     from sqlalchemy.ext.asyncio import create_async_engine
 
-    from pycommon.persistence.engine import database_lifespan_resource
+    from py_common.persistence.engine import database_lifespan_resource
 
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     resource = database_lifespan_resource(engine)
@@ -327,17 +327,17 @@ async def test_database_lifespan_resource_connects_then_disposes() -> None:
 def test_alembic_helpers_name_the_extra_when_alembic_is_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``pycommon[persistence]`` does not install Alembic; ``[migrations]`` does.
+    """``py-common[persistence]`` does not install Alembic; ``[migrations]`` does.
 
     A bare ``ModuleNotFoundError: alembic`` leaves the reader guessing which
     extra they missed, so the guard says it.
     """
     import sys
 
-    from pycommon.config import DatabaseSettings
-    from pycommon.persistence import build_alembic_config
+    from py_common.config import DatabaseSettings
+    from py_common.persistence import build_alembic_config
 
     monkeypatch.setitem(sys.modules, "alembic.config", None)
 
-    with pytest.raises(ImportError, match=r"pycommon\[migrations\]"):
+    with pytest.raises(ImportError, match=r"py-common\[migrations\]"):
         build_alembic_config(DatabaseSettings())

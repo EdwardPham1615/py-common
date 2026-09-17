@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Something in pycommon does not behave as documented
+about: Something in py-common does not behave as documented
 labels: bug
 ---
 
@@ -23,8 +23,8 @@ that runs on its own is nearly as good.
 
 ## Environment
 
-- pycommon version (the tag you pinned):
-- Extras installed (`pycommon[http,persistence]`, …):
+- py-common version (the tag you pinned):
+- Extras installed (`py-common[http,persistence]`, …):
 - Python version:
 - Anything relevant about the deployment (behind an ingress, Redis version, …):
 
