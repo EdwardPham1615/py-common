@@ -119,6 +119,16 @@ class KeycloakTokenValidator:
         except jwt.PyJWTError as exc:
             raise unauthorized() from exc
 
+        # Checked here rather than inside _decode_once so it can never be
+        # mistaken for a signing failure and send us back to Keycloak for a
+        # fresh JWKS: the signature was fine, the issuing client was not.
+        #
+        # A missing azp is a rejection, not a pass. Once a service has declared
+        # which clients it trusts, a token that will not say where it came from
+        # cannot be one of them.
+        if self.settings.allowed_azp and payload.get("azp") not in self.settings.allowed_azp:
+            raise unauthorized("Token was not issued to a client this service accepts")
+
         realm_access = payload.get("realm_access") or {}
         resource_access = payload.get("resource_access") or {}
         client_roles = (resource_access.get(self.settings.client_id) or {}).get("roles") or []

@@ -173,6 +173,36 @@ def test_a_subject_with_no_role_on_our_client_gets_aud_account_and_is_rejected(
     assert rejected.value.detail == "Invalid or expired token"
 
 
+def test_allowed_azp_closes_the_hole_the_audience_check_leaves_open(
+    keycloak_settings: Any, keycloak_token: TokenFetcher
+) -> None:
+    """The same token, the same validator, one setting apart.
+
+    This is the test above turned around. alice's token from
+    ``pycommon-api-noaud`` passes an audience check it arguably should not,
+    because Keycloak put ``pycommon-api`` in ``aud`` on the strength of her
+    roles. ``allowed_azp`` is what lets a service say it trusts tokens from its
+    own front end and not from every client sharing the realm — and here it
+    rejects the very token the previous test proved gets through.
+    """
+    token = keycloak_token("pycommon-api-noaud", user="alice")["access_token"]
+
+    permissive = KeycloakTokenValidator(settings=keycloak_settings)
+    assert permissive.decode(token).raw["azp"] == "pycommon-api-noaud"
+
+    strict = KeycloakTokenValidator(
+        settings=keycloak_settings.model_copy(update={"allowed_azp": ["pycommon-api"]})
+    )
+    with pytest.raises(HTTPException) as rejected:
+        strict.decode(token)
+    assert rejected.value.detail == "Token was not issued to a client this service accepts"
+
+    # And the client's own token still gets through the strict validator, so
+    # this is narrowing rather than breaking.
+    own = keycloak_token("pycommon-api", user="alice")["access_token"]
+    assert strict.decode(own).raw["azp"] == "pycommon-api"
+
+
 # --- service-to-service ----------------------------------------------------
 
 

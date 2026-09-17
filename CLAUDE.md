@@ -258,6 +258,11 @@ code, so treat these as closed unless something new contradicts them:
   our client, who gets `aud: "account"` and a bare "Invalid or expired token".
   `.env.example` asserted the opposite until the test was written. Don't turn
   the default off to make something pass, and don't restate the old claim.
+  `KEYCLOAK__ALLOWED_AZP` answers the question `aud` is assumed to answer: it
+  checks `azp`, the client that actually requested the token. Off by default,
+  and a setting on the validator rather than a `Requirement` — which clients may
+  reach a service at all is uniform for the whole service, so it belongs with
+  authentication, not in the per-route algebra.
 
 - **Bulkhead / concurrency limiting is not wanted here.** It was considered
   and dropped, not deferred: don't propose it as a gap, don't add a

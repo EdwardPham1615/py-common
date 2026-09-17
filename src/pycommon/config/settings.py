@@ -273,6 +273,25 @@ class KeycloakSettings(BaseModel):
     # otherwise. See README's "Scoping a service token".
     token_scope: str | None = None
 
+    # Client ids allowed to have obtained the token, read from `azp`. Empty
+    # accepts any, which is the behaviour every deployment has had until now.
+    #
+    # This is not `aud` in another spelling. Keycloak fills `aud` from the
+    # clients the *subject holds roles on*, so a token any client in the realm
+    # obtained is accepted by your API for any user who holds a role there --
+    # measured, and pinned in tests/integration/test_keycloak_integration.py.
+    # `azp` is the only claim naming the client that actually asked, and this is
+    # how a service says it trusts tokens from its own front end and not from
+    # every client sharing the realm.
+    #
+    # A setting rather than a Requirement because it is uniform for the whole
+    # service: which clients may talk to it at all is a trust boundary, not a
+    # per-endpoint decision. Set it only when the realm really does hold clients
+    # at different trust levels -- with one client it buys nothing, and listing
+    # every legitimate front end is a maintenance cost you should be choosing
+    # on purpose.
+    allowed_azp: list[str] = Field(default_factory=list)
+
     @property
     def issuer(self) -> str:
         return f"{self.server_url.rstrip('/')}/realms/{self.realm}"
