@@ -4,22 +4,32 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
+The distribution is **`py-common`**; the import package is **`py_common`**. A
+hyphen is not a valid identifier, so both spellings are load-bearing:
+`py-common` in install commands, extras, and any error message telling somebody
+what to install; `py_common` everywhere Python is. `pycommon` on PyPI is an
+unrelated project, which is why neither spelling is that.
+
 `py_common` is a shared platform library (config, logging, telemetry, security,
 storage, HTTP helpers, runtime, persistence, cache, utils) for internal FastAPI
 services, installed by pinning a git tag. It is *not* an application — there is
 no domain logic here.
 
 **Current state: `v0.2.1` shipped 2026-09-18 and no service consumes it yet.**
-**Requires Python 3.14+** — the floor tracks the current stable release, not the
-oldest one still getting security fixes. Nothing here needs 3.14; it is a support
-commitment made while raising it is still free. 3.15 is not usable yet
-(`psycopg-binary` and four others publish no `cp315` wheel).
 That is worth knowing before weighing a breaking change, and worth correcting
 here the moment it stops being true — it is the difference between a rename
-costing one PR and a rename costing somebody an outage. Once services do pin a
-tag, a change ships to all of them at once: prefer additive changes (new
-optional parameters, new modules) over breaking ones, and see "Governance" in
-README.md before changing any public signature.
+costing one PR and a rename costing somebody an outage. `0.2.0` spent that
+budget on three at once (the package rename, `create_auth_deps` → `Auth`, and
+the Python floor), which was affordable only because the window was still open.
+Once services do pin a tag, a change ships to all of them at once: prefer
+additive changes (new optional parameters, new modules) over breaking ones, and
+see "Governance" in README.md before changing any public signature.
+
+**Requires Python 3.14+.** The floor tracks the current stable release rather
+than the oldest one still getting security fixes. Nothing here needs 3.14; it is
+a support commitment made while raising it was still free. 3.15 is not usable
+yet — `psycopg-binary` publishes no `cp315` wheel and has no sdist to fall back
+on, and `asyncpg`, `uvloop`, `httptools` and `lupa` have none either.
 
 ## Commands
 
@@ -27,7 +37,7 @@ README.md before changing any public signature.
 make install          # uv sync --extra all --extra dev
 make check            # lint + format-check + mypy --strict + test-cov — run before pushing
 make lint             # ruff check src tests
-make format           # ruff format (writes)
+make format           # ruff format (writes) -- also Python blocks inside Markdown
 make typecheck        # mypy --strict on src/py_common
 make test             # pytest
 make test-cov         # pytest with coverage (fails under 85%, see pyproject.toml)
@@ -35,16 +45,24 @@ make infra-up         # docker compose: Redis, Postgres, Jaeger, MinIO, Keycloak
 make test-integration-local  # infra-up, then the integration suite with the right env
 make infra-down       # stop them and delete the data
 make test-integration # tests/integration when the env vars are already set — see below
+make extras-check     # install each extra alone, import what it promises (its own CI job)
+make keycloak-export  # dump the running test realm to /tmp, to diff against the fixture
 make audit            # pip-audit against the locked, exported dependency set
 make pre-commit       # install + run pre-commit hooks
 ```
 
-`make check` runs the same lint/typecheck/test commands as CI, but **not the
-same test scope**: CI's `lint-test` job sets `REDIS_TEST_URL`,
-`POSTGRES_TEST_DSN`, `OTLP_TEST_ENDPOINT`, `S3_TEST_ENDPOINT` and
-`KEYCLOAK_TEST_URL` at the job level, so its single `pytest` run includes the
-integration suite that skips locally. A green `make check` can still meet a
-red CI, and local coverage reads lower than CI's for the same reason.
+`make check` is narrower than CI in two ways, so a green one can still meet a
+red build:
+
+- **Test scope.** CI's `lint-test` job sets `REDIS_TEST_URL`,
+  `POSTGRES_TEST_DSN`, `OTLP_TEST_ENDPOINT`, `S3_TEST_ENDPOINT` and
+  `KEYCLOAK_TEST_URL` at the job level, so its single `pytest` run includes the
+  integration suite that skips locally. Local coverage reads lower for the same
+  reason.
+- **Jobs it does not run at all.** `extras-isolation` and `audit` are separate
+  CI jobs, and `make check` invokes neither. Run `make extras-check` by hand
+  after touching any package `__init__` or moving an import — that is the gate
+  0.2.0 shipped four unimportable extras past.
 
 Single test / single file (tests are flat in `tests/`, one file per area):
 
@@ -128,7 +146,7 @@ because it runs under `--extra all`.
 
 | Module | Responsibility |
 |--------|----------------|
-| `config` | `BaseAppSettings` with `http`/`server`/`cors` built in; DB/Redis/Keycloak/OTel/S3/`ProfilerSettings` declared per service, via `POSTGRES__HOST`-style env keys. All 77 keys are written down in `.env.example`, which tests hold to the settings classes in both directions |
+| `config` | `BaseAppSettings` with `http`/`server`/`cors` built in; DB/Redis/Keycloak/OTel/S3/`ProfilerSettings` declared per service, via `POSTGRES__HOST`-style env keys. All 80 keys are written down in `.env.example`, which tests hold to the settings classes in both directions |
 | `logging` | ECS JSON via `structlog` + `ecs-logging`, correlated with OTel trace/span IDs |
 | `telemetry` | OTel bootstrap (traces + metrics), instrumentors, shutdown/flush, opt-in `enable_profiler` |
 | `errors` | `ErrorCode` + `AppError` factories → RFC 9457 Problem Details |
@@ -141,7 +159,7 @@ because it runs under `--extra all`.
 | `persistence` | Engine/sessionmaker, structured query logging, `Base` + naming convention, thin Alembic helpers, `Repository`/`UnitOfWork` |
 | `utils` | `retry_async` (tenacity), `new_nanoid`/`new_uuid7`, `Clock`/`FixedClock`, `AsyncCircuitBreaker` |
 | `testing` | `FakeUnitOfWork`, `InMemoryRepository`, JWT test-token factory, `assert_routes_protected` — the doubles and assertions this library ships for *consumers* to test against |
-| `lifecycle` (top-level module) | Process-wide draining flag (`begin_draining`/`is_draining`/`reset_draining`), shared by the HTTP and gRPC layers so both stop accepting traffic together. The only thing `py-common/__init__.py` re-exports besides `__version__`. |
+| `lifecycle` (top-level module) | Process-wide draining flag (`begin_draining`/`is_draining`/`reset_draining`), shared by the HTTP and gRPC layers so both stop accepting traffic together. The only thing `py_common/__init__.py` re-exports besides `__version__`. |
 
 Read README.md's "Quick usage" and per-topic sections
 (Idempotency keys, Request body limits, Request timeouts, Graceful
