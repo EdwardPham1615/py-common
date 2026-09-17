@@ -1,5 +1,5 @@
 blank_issues_enabled: true
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/EdwardPham1615/pycommon/security/advisories/new
+    url: https://github.com/EdwardPham1615/py-common/security/advisories/new
     about: Report privately instead of opening a public issue. See SECURITY.md.

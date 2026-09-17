@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 **Do not open a public issue.** Report privately through
-[GitHub's private vulnerability reporting](https://github.com/EdwardPham1615/pycommon/security/advisories/new),
+[GitHub's private vulnerability reporting](https://github.com/EdwardPham1615/py-common/security/advisories/new),
 which reaches the maintainer without disclosing anything.
 
 Please include the pinned version, which extras you installed, and the smallest
