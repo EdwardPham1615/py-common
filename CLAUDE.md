@@ -9,7 +9,7 @@ storage, HTTP helpers, runtime, persistence, cache, utils) for internal FastAPI
 services, installed by pinning a git tag. It is *not* an application — there is
 no domain logic here.
 
-**Current state: `v0.1.0` shipped 2026-09-13 and no service consumes it yet.**
+**Current state: `v0.2.0` shipped 2026-09-18 and no service consumes it yet.**
 **Requires Python 3.14+** — the floor tracks the current stable release, not the
 oldest one still getting security fixes. Nothing here needs 3.14; it is a support
 commitment made while raising it is still free. 3.15 is not usable yet
