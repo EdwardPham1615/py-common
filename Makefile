@@ -3,7 +3,12 @@
 
 UV ?= uv
 SRC := src
-PKG := src/pycommon
+PKG := src/py_common
+# ruff formats Python code blocks inside Markdown, so the docs are checked with
+# the same command the pre-commit hook runs. Keeping them out would put the hook
+# and CI back out of step, which is the drift this list exists to prevent -- and
+# it means a README snippet that does not parse now fails the build.
+DOCS := $(wildcard *.md) $(wildcard .github/*.md) $(wildcard .github/ISSUE_TEMPLATE/*.md)
 TESTS := tests
 
 help: ## Show available targets
@@ -18,11 +23,11 @@ sync: install ## Alias for install
 lint: ## Ruff lint (src + tests)
 	$(UV) run ruff check $(SRC) $(TESTS)
 
-format: ## Ruff format (write)
-	$(UV) run ruff format $(SRC) $(TESTS)
+format: ## Ruff format (write) -- includes Python blocks inside Markdown
+	$(UV) run ruff format $(SRC) $(TESTS) $(DOCS)
 
 format-check: ## Ruff format check (CI)
-	$(UV) run ruff format --check $(SRC) $(TESTS)
+	$(UV) run ruff format --check $(SRC) $(TESTS) $(DOCS)
 
 typecheck: ## Mypy strict on package
 	$(UV) run python -m mypy $(PKG)
@@ -31,7 +36,7 @@ test: ## Pytest
 	$(UV) run python -m pytest
 
 test-cov: ## Pytest with coverage
-	$(UV) run python -m pytest --cov=pycommon --cov-report=term-missing
+	$(UV) run python -m pytest --cov=py_common --cov-report=term-missing
 
 test-integration: ## Run integration tests against real Redis / Postgres (see CONTRIBUTING)
 	@test -n "$$REDIS_TEST_URL" -o -n "$$POSTGRES_TEST_DSN" || { \

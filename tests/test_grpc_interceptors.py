@@ -11,7 +11,7 @@ import grpc
 import pytest
 import structlog
 
-from pycommon.runtime.grpc_interceptors import (
+from py_common.runtime.grpc_interceptors import (
     REQUEST_ID_METADATA_KEY,
     RequestIdClientInterceptor,
     RequestIdServerInterceptor,

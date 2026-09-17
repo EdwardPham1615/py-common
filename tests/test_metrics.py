@@ -28,9 +28,9 @@ from opentelemetry.sdk.metrics import (
 from opentelemetry.sdk.metrics.export import AggregationTemporality, InMemoryMetricReader
 from starlette.testclient import TestClient
 
-from pycommon.config import BaseAppSettings, HttpSettings
-from pycommon.http.middleware import MetricsMiddleware, apply_standard_middleware
-from pycommon.runtime import GrpcChannelPool, GrpcServer
+from py_common.config import BaseAppSettings, HttpSettings
+from py_common.http.middleware import MetricsMiddleware, apply_standard_middleware
+from py_common.runtime import GrpcChannelPool, GrpcServer
 
 ECHO_METHOD = "/probe.Probe/Echo"
 STREAM_METHOD = "/probe.Probe/Stream"
@@ -200,7 +200,7 @@ def test_metrics_can_be_turned_off(reader: InMemoryMetricReader) -> None:
 
 
 def test_scrape_endpoint_reports_503_until_metrics_are_set_up() -> None:
-    from pycommon.telemetry import build_metrics_router
+    from py_common.telemetry import build_metrics_router
 
     app = FastAPI()
     app.include_router(build_metrics_router())
@@ -218,7 +218,7 @@ def isolated_setup() -> Iterator[Any]:
     API pins that for the process, so the provider ``setup_metrics`` builds here
     is inert and the session reader keeps serving every other test.
     """
-    from pycommon.telemetry import metrics as metrics_module
+    from py_common.telemetry import metrics as metrics_module
 
     yield metrics_module
     metrics_module._provider = None
@@ -239,7 +239,7 @@ def test_setup_metrics_is_idempotent(isolated_setup: Any) -> None:
 
 
 def test_scrape_endpoint_serves_prometheus_text(isolated_setup: Any) -> None:
-    from pycommon.telemetry import build_metrics_router
+    from py_common.telemetry import build_metrics_router
 
     provider = isolated_setup.setup_metrics(service_name="probe", otlp=False, prometheus=True)
     # Record through this provider's own meter: the process-global one is

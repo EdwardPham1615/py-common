@@ -1,5 +1,5 @@
 [project]
-name = "pycommon"
+name = "py-common"
 version = "0.1.0"
 description = "Reusable platform library: config, logging, telemetry, security, storage, HTTP, runtime, persistence"
 readme = "README.md"
@@ -17,7 +17,7 @@ license-files = ["LICENSE"]
 dependencies = [
     "pydantic>=2.13.5",
     "pydantic-settings>=2.15.0",
-    # Already pulled in by pydantic-settings, but pycommon imports it directly
+    # Already pulled in by pydantic-settings, but py_common imports it directly
     # to read ENVIRONMENT out of .env before choosing which env files to load.
     "python-dotenv>=1.2.3",
     "structlog>=25.3.0",
@@ -85,7 +85,7 @@ profiling = [
     "fastapi_profiler>=1.5.0",
 ]
 all = [
-    "pycommon[http,storage,security,telemetry,grpc,runtime,persistence,migrations,cache,profiling]",
+    "py-common[http,storage,security,telemetry,grpc,runtime,persistence,migrations,cache,profiling]",
 ]
 dev = [
     "ruff>=0.16.6",
@@ -105,7 +105,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/pycommon"]
+packages = ["src/py_common"]
 
 [tool.ruff]
 target-version = "py314"
@@ -151,7 +151,7 @@ warn_unused_configs = true
 disallow_untyped_defs = true
 plugins = ["pydantic.mypy"]
 mypy_path = ["src"]
-packages = ["pycommon"]
+packages = ["py_common"]
 
 [[tool.mypy.overrides]]
 module = [
@@ -175,7 +175,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["src/pycommon"]
+source = ["src/py_common"]
 branch = true
 # The integration suite is skipped without REDIS_TEST_URL. Leaving it in the
 # measurement would make the same code look less covered on a laptop than in CI.

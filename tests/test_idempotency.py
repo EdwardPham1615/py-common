@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from redis.asyncio import Redis
 from redis.exceptions import ConnectionError as RedisConnectionError
 
-from pycommon.http.middleware import IdempotencyMiddleware
+from py_common.http.middleware import IdempotencyMiddleware
 
 
 @pytest.fixture

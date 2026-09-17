@@ -21,7 +21,7 @@ tag, so the practical remedy for a security fix is to move to the newest one.
 
 ## Scope
 
-pycommon is a library, not a service: it has no deployment of its own and holds
+py-common is a library, not a service: it has no deployment of its own and holds
 no data. The vulnerabilities that matter here are ones a consuming service would
 inherit — an auth check that passes when it should not, a header parsed from an
 untrusted source and trusted, credentials or tokens reaching logs, or a default

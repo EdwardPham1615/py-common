@@ -11,8 +11,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from pycommon.persistence.mixins import SoftDeleteMixin, TimestampMixin, UUIDv7PrimaryKeyMixin
-from pycommon.persistence.pagination import paginate_cursor, paginate_offset
+from py_common.persistence.mixins import SoftDeleteMixin, TimestampMixin, UUIDv7PrimaryKeyMixin
+from py_common.persistence.pagination import paginate_cursor, paginate_offset
 
 
 class Base(DeclarativeBase):
@@ -195,7 +195,7 @@ async def test_malformed_cursor_raises_value_error(session: AsyncSession) -> Non
     with pytest.raises(ValueError, match="Invalid pagination cursor"):
         await paginate_cursor(session, select(Item), key_column=Item.id, cursor="not-base64!!")
 
-    from pycommon.http.pagination import encode_cursor
+    from py_common.http.pagination import encode_cursor
 
     with pytest.raises(ValueError, match="Invalid pagination cursor"):
         await paginate_cursor(

@@ -15,7 +15,7 @@ import pytest
 import structlog
 from grpc import aio
 
-from pycommon.runtime import GrpcChannelPool, GrpcServer
+from py_common.runtime import GrpcChannelPool, GrpcServer
 
 ECHO_METHOD = "/probe.Echo/Call"
 
@@ -159,7 +159,7 @@ async def test_disabled_server_does_not_listen() -> None:
 
 def test_request_id_client_interceptors_cover_every_rpc_shape() -> None:
     """Registering only the unary-unary one silently dropped the ID on streams."""
-    from pycommon.runtime.grpc_interceptors import request_id_client_interceptors
+    from py_common.runtime.grpc_interceptors import request_id_client_interceptors
 
     interceptors = request_id_client_interceptors()
     bases = {
@@ -174,7 +174,7 @@ def test_request_id_client_interceptors_cover_every_rpc_shape() -> None:
 
 def test_otel_client_interceptors_are_attached_by_default() -> None:
     """The mirror of the server side — without these, outbound calls send no traceparent."""
-    from pycommon.runtime import default_otel_client_interceptors
+    from py_common.runtime import default_otel_client_interceptors
 
     assert default_otel_client_interceptors(), "OTel grpc instrumentation should be installed"
 

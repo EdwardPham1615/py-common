@@ -35,10 +35,10 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from jwt import PyJWKClient
 
-from pycommon.config import BaseAppSettings
-from pycommon.http.middleware import apply_standard_middleware
-from pycommon.http.problem import register_exception_handlers
-from pycommon.security import (
+from py_common.config import BaseAppSettings
+from py_common.http.middleware import apply_standard_middleware
+from py_common.http.problem import register_exception_handlers
+from py_common.security import (
     Auth,
     ClientCredentialsTokenProvider,
     HasRole,
@@ -140,7 +140,7 @@ def test_aud_names_our_client_only_because_the_user_holds_a_role_there(
     establish that the token was issued to your client.** Any other client in
     the realm can obtain a token your API will accept, for any user who has a
     role on your API. ``azp`` is the claim that names the requesting client, and
-    nothing in pycommon checks it today.
+    nothing in py_common checks it today.
     """
     token = keycloak_token("pycommon-api-noaud", user="alice")["access_token"]
 

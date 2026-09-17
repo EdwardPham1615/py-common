@@ -1,4 +1,4 @@
-# pycommon
+# py-common
 
 Reusable platform library for FastAPI (and related) Python services: config, logging, telemetry, security, storage, HTTP helpers, runtime, persistence, cache, and shared utilities.
 
@@ -8,17 +8,17 @@ Reusable platform library for FastAPI (and related) Python services: config, log
 than the oldest still receiving security fixes: a consuming service is one this
 team also runs, and 3.13 left its bugfix window on 2026-10-01.
 
-Note the name: there is an unrelated `pycommon` on PyPI. Install from the Git
-URL below, never `pip install pycommon`.
+Note the name: there is an unrelated `py_common` on PyPI. Install from the Git
+URL below, never `pip install py-common`.
 
 ### From a Git URL (recommended for consumers)
 
 ```bash
 # uv
-uv add "pycommon[all] @ git+https://github.com/EdwardPham1615/pycommon.git@v0.1.0"
+uv add "py-common[all] @ git+https://github.com/EdwardPham1615/pycommon.git@v0.1.0"
 
 # pip
-pip install "pycommon[all] @ git+https://github.com/EdwardPham1615/pycommon.git@v0.1.0"
+pip install "py-common[all] @ git+https://github.com/EdwardPham1615/pycommon.git@v0.1.0"
 ```
 
 Pin a tag or commit SHA for reproducible builds.
@@ -27,10 +27,10 @@ Pin a tag or commit SHA for reproducible builds.
 
 ```toml
 # in your service pyproject.toml
-dependencies = ["pycommon[all]"]
+dependencies = ["py-common[all]"]
 
 [tool.uv.sources]
-pycommon = { path = "../pycommon", editable = true }
+py-common = { path = "../py-common", editable = true }
 ```
 
 ### Optional extras
@@ -52,7 +52,7 @@ Core always installs: `pydantic`, `pydantic-settings`, `structlog`, `ecs-logging
 | `all` | Everything above |
 | `dev` | ruff, mypy, pytest, pre-commit, aiosqlite, fakeredis |
 
-Example: `uv add "pycommon[http,persistence,runtime] @ git+https://github.com/EdwardPham1615/pycommon.git@v0.1.0"`
+Example: `uv add "py-common[http,persistence,runtime] @ git+https://github.com/EdwardPham1615/pycommon.git@v0.1.0"`
 
 ## Modules
 
@@ -107,7 +107,7 @@ wrong outside a laptop. Copy it into a service and uncomment what you change:
 cp .env.example .env
 ```
 
-Every key is live and set to the value pycommon already uses, so a fresh copy
+Every key is live and set to the value py-common already uses, so a fresh copy
 changes nothing — it starts the service exactly as an empty `.env` would, and a
 test keeps that true. Eight keys are commented out instead: those are the
 settings whose default is *off*, and no value expresses that — an empty number
@@ -123,7 +123,7 @@ start-up, `CORS__ORIGINS=["a","b"]` is the form.
 Tests walk the settings classes and the file in both directions, so a setting
 added without documenting it — or a key left behind after one is removed —
 fails CI rather than a consuming service. A further one asserts that every
-settings group `pycommon.config` exports is among the classes those checks
+settings group `py_common.config` exports is among the classes those checks
 walk, since that list is written by hand and would otherwise be the way the
 guarantee quietly narrows.
 
@@ -151,7 +151,7 @@ groups are on `BaseAppSettings` itself, since every HTTP service needs them:
 | `SERVER__DRAIN_DELAY_SECONDS` | `0` | keep serving this long after SIGTERM |
 
 ```python
-apply_standard_middleware(app, settings)      # reads settings.http and settings.cors
+apply_standard_middleware(app, settings)  # reads settings.http and settings.cors
 run_from_settings("main:app", settings.server)
 ```
 
@@ -193,10 +193,10 @@ The instruments are created from the OTel **API**, so they are no-ops with no me
 To be scraped instead of pushed:
 
 ```python
-from pycommon.telemetry import build_metrics_router, setup_telemetry
+from py_common.telemetry import build_metrics_router, setup_telemetry
 
 setup_telemetry(app, service_name=..., prometheus_metrics=True)
-app.include_router(build_metrics_router())   # GET /metrics
+app.include_router(build_metrics_router())  # GET /metrics
 ```
 
 Workers, gRPC servers and CLIs have no FastAPI app; they call `setup_metrics(service_name=...)` directly. Call `shutdown_telemetry()` on shutdown — it flushes both providers, and the unflushed window is exactly the one where a crashing pod's metrics matter most.
@@ -220,12 +220,12 @@ FORWARDED_ALLOW_IPS='10.0.0.0/8'   # or the ingress CIDR / '*' if the proxy is t
 or explicitly:
 
 ```python
-run_from_settings("main:app", settings.server)   # SERVER__FORWARDED_ALLOW_IPS
+run_from_settings("main:app", settings.server)  # SERVER__FORWARDED_ALLOW_IPS
 ```
 
 Prefer the narrowest value that matches your proxy. `'*'` trusts `X-Forwarded-For` from *any* peer, which is safe only when nothing but the proxy can reach the port.
 
-pycommon reads the resolved value through a single helper, `pycommon.http.middleware.client_ip`, shared by the access log and the rate-limit dependency so both always agree on who the caller is. It deliberately never parses `X-Forwarded-For` itself: any client can send that header, and trusting it unconditionally lets callers forge their own address in your logs and rate-limit buckets.
+py-common reads the resolved value through a single helper, `py_common.http.middleware.client_ip`, shared by the access log and the rate-limit dependency so both always agree on who the caller is. It deliberately never parses `X-Forwarded-For` itself: any client can send that header, and trusting it unconditionally lets callers forge their own address in your logs and rate-limit buckets.
 
 ## Content Security Policy
 
@@ -239,7 +239,7 @@ protects nothing:
 HTTP__CONTENT_SECURITY_POLICY="default-src 'none'; frame-ancestors 'none'"
 ```
 
-`pycommon.http.middleware.API_CONTENT_SECURITY_POLICY` holds that value if you
+`py_common.http.middleware.API_CONTENT_SECURITY_POLICY` holds that value if you
 would rather set it from code.
 
 `API_CONTENT_SECURITY_POLICY` is `default-src 'none'; frame-ancestors 'none'`.
@@ -287,19 +287,21 @@ Two things worth checking before switching it on:
 Cache-aside for **values**, not HTTP responses — it takes no `Request`, so the same code works in a route, a gRPC servicer, a Celery worker or a CLI job.
 
 ```python
-from pycommon.cache import Cache, cached, pydantic_serializer
+from py_common.cache import Cache, cached, pydantic_serializer
+
 
 @cached(redis, namespace="products", ttl_seconds=300)
 async def get_product(product_id: str) -> dict:
     return await repository.get(product_id)
 
-await get_product.invalidate("abc-123")     # after a write
+
+await get_product.invalidate("abc-123")  # after a write
 
 # or explicitly
 cache = Cache(redis, namespace="products", ttl_seconds=300)
 product = await cache.get_or_set(product_id, lambda: repository.get(product_id))
 await cache.delete(product_id)
-await cache.clear()                          # whole namespace
+await cache.clear()  # whole namespace
 ```
 
 - **Stampede protection is on by default.** When a popular key expires under load, only one caller computes it; the rest wait briefly and read what it stored. Without it every concurrent request goes to the database at once.
@@ -311,10 +313,11 @@ await cache.clear()                          # whole namespace
 ## Rate limiting
 
 ```python
-from pycommon.cache import RedisRateLimiter, RedisSlidingWindowRateLimiter
-from pycommon.http.middleware.rate_limit import build_rate_limit_dep
+from py_common.cache import RedisRateLimiter, RedisSlidingWindowRateLimiter
+from py_common.http.middleware.rate_limit import build_rate_limit_dep
 
 rate_limited = build_rate_limit_dep(RedisRateLimiter(redis), "10/second")
+
 
 @router.post("/login", dependencies=[Depends(rate_limited)])
 async def login(): ...
@@ -334,13 +337,13 @@ Rate limits are only per-caller if the client IP is resolved correctly — see [
 
 ## Libraries we deliberately don't vendor
 
-Both belong at the **service layer**, not here. Adding either to pycommon would push its opinions onto every service at once.
+Both belong at the **service layer**, not here. Adding either to py-common would push its opinions onto every service at once.
 
-**fastapi-guard** — a full security suite that would conflict with our middleware stack (CORS, headers, auth). Services needing IP ban / geo-block / bot detection can add it themselves, or better: enforce those at the API gateway. Business rate limiting lives in `pycommon.cache` + `build_rate_limit_dep`.
+**fastapi-guard** — a full security suite that would conflict with our middleware stack (CORS, headers, auth). Services needing IP ban / geo-block / bot detection can add it themselves, or better: enforce those at the API gateway. Business rate limiting lives in `py_common.cache` + `build_rate_limit_dep`.
 
-**fastapi-redis-sdk** (official Redis SDK) — offers HTTP response caching with ETag/304, which pycommon does not. Worth adding to a service that needs it, but not to pycommon, because:
+**fastapi-redis-sdk** (official Redis SDK) — offers HTTP response caching with ETag/304, which py-common does not. Worth adding to a service that needs it, but not to py-common, because:
 
-- it is FastAPI-coupled (`FastAPIRedis(app).lifespan()`, everything via `Depends()`, cache keys derived from `Request`), while `pycommon.cache` must also work from gRPC servicers, Celery workers and CLI jobs
+- it is FastAPI-coupled (`FastAPIRedis(app).lifespan()`, everything via `Depends()`, cache keys derived from `Request`), while `py_common.cache` must also work from gRPC servicers, Celery workers and CLI jobs
 - its `.lifespan()` overlaps `build_lifespan`, and its flat `REDIS_*` env keys conflict with `BaseAppSettings`' nested `REDIS__URL`
 - its 429 is not problem+json, which would reopen the error-contract inconsistency this library just fixed
 - it has no distributed lock, so it does not replace `redis_lock` either
@@ -351,26 +354,28 @@ Ideas worth borrowing from it are already implemented here: fail-open limiting w
 ## Quick usage
 
 ```python
-from pycommon.config import BaseAppSettings, DatabaseSettings, ProfilerSettings
-from pycommon.http import (
+from py_common.config import BaseAppSettings, DatabaseSettings, ProfilerSettings
+from py_common.http import (
     build_health_router,
     build_problem_types_router,
     register_exception_handlers,
 )
-from pycommon.http.middleware import apply_standard_middleware
-from pycommon.logging import setup_logging
-from pycommon.persistence import (
+from py_common.http.middleware import apply_standard_middleware
+from py_common.logging import setup_logging
+from py_common.persistence import (
     create_engine_and_sessionmaker,
     database_lifespan_resource,
     migration_lifespan_resource,
 )
-from pycommon.runtime import build_lifespan, create_base_app, run_uvicorn
-from pycommon.telemetry import enable_profiler
+from py_common.runtime import build_lifespan, create_base_app, run_uvicorn
+from py_common.telemetry import enable_profiler
+
 
 class Settings(BaseAppSettings):
     app_name: str = "my-service"
     postgres: DatabaseSettings = DatabaseSettings()
     profiler: ProfilerSettings = ProfilerSettings()
+
 
 settings = Settings()
 setup_logging(
@@ -396,7 +401,9 @@ register_exception_handlers(app, problem_type_base_url=settings.http.problem_typ
 apply_standard_middleware(app, settings)
 enable_profiler(app, settings.profiler, environment=settings.environment.value)
 app.include_router(build_health_router([]))
-app.include_router(build_problem_types_router(problem_type_base_url=settings.http.problem_type_base_url))
+app.include_router(
+    build_problem_types_router(problem_type_base_url=settings.http.problem_type_base_url)
+)
 
 if __name__ == "__main__":
     run_uvicorn("main:app", reload=True)
@@ -405,7 +412,7 @@ if __name__ == "__main__":
 Raise application errors with shared `ErrorCode` values (HTTP status is fixed per code):
 
 ```python
-from pycommon.errors import AppError
+from py_common.errors import AppError
 
 raise AppError.input("Order 42 does not exist")
 # → application/problem+json with type=/problems/input, error_code=3, status=400
@@ -429,26 +436,35 @@ into something inherited without being reread.
 
 ```python
 from fastapi import APIRouter, Depends
-from pycommon.security import (
-    Auth, HasRole, HasScope, KeycloakTokenValidator,
-    TokenClaims, internal_router, protected_router,
+from py_common.security import (
+    Auth,
+    HasRole,
+    HasScope,
+    KeycloakTokenValidator,
+    TokenClaims,
+    internal_router,
+    protected_router,
 )
 
 auth = Auth(KeycloakTokenValidator(settings.keycloak))
 
-api      = protected_router(auth, prefix="/api/v1", tags=["api"])
+api = protected_router(auth, prefix="/api/v1", tags=["api"])
 internal = internal_router(settings, prefix="/internal", tags=["internal"])
-public   = APIRouter(prefix="/api/public/v1", tags=["public"])
+public = APIRouter(prefix="/api/public/v1", tags=["public"])
 
-@api.get("/me")                                    # authentication only
+
+@api.get("/me")  # authentication only
 async def me(user: TokenClaims = Depends(auth.current_user)):
     return {"sub": user.sub}
+
 
 @api.delete("/users/{uid}", dependencies=[Depends(auth.require_roles("admin"))])
 async def delete_user(uid: str): ...
 
-@api.post("/orders", dependencies=[Depends(auth.requires(
-    HasRole("admin") | HasScope("orders:write")))])
+
+@api.post(
+    "/orders", dependencies=[Depends(auth.requires(HasRole("admin") | HasScope("orders:write")))]
+)
 async def create_order(): ...
 ```
 
@@ -500,7 +516,8 @@ Forgetting is the failure this design is shaped around, so check it in the
 service's own suite:
 
 ```python
-from pycommon.testing.routes import PYCOMMON_PUBLIC_PREFIXES, assert_routes_protected
+from py_common.testing.routes import PYCOMMON_PUBLIC_PREFIXES, assert_routes_protected
+
 
 def test_no_route_is_accidentally_public():
     assert_routes_protected(
@@ -547,7 +564,7 @@ Because `RequestContextMiddleware` fully handles unhandled exceptions, they no l
 Success envelope (optional):
 
 ```python
-from pycommon.http import ApiResponse
+from py_common.http import ApiResponse
 
 return ApiResponse.ok({"id": order.id})
 ```
@@ -564,19 +581,21 @@ Set `HTTP__PROBLEM_TYPE_BASE_URL=https://docs.example.com/problems` to emit abso
 
 **Query logging** — set `POSTGRES__LOG_QUERIES=true` for structured SQL logs (statement + `duration_ms`) via structlog. Use `POSTGRES__SLOW_QUERY_THRESHOLD_MS=200` to only warn on slow queries. Failed queries are always logged as `db_query_failed` regardless of the threshold — a deadlock or statement timeout is worth seeing however fast it failed. Keep `POSTGRES__LOG_QUERY_PARAMS=false` unless debugging (params may contain PII). `POSTGRES__ECHO=true` remains available for raw SQLAlchemy echo in local dev.
 
-**Migrations** — pycommon provides thin Alembic helpers; each service owns `alembic.ini`, `alembic/env.py`, and `alembic/versions/`.
+**Migrations** — py-common provides thin Alembic helpers; each service owns `alembic.ini`, `alembic/env.py`, and `alembic/versions/`.
 
 ```bash
-uv add "pycommon[persistence,migrations]"
+uv add "py-common[persistence,migrations]"
 ```
 
 ```python
-from pycommon.persistence import Base, build_alembic_config, upgrade_to_head
+from py_common.persistence import Base, build_alembic_config, upgrade_to_head
+
 
 # models inherit Base (shared naming convention for autogenerate)
 class Order(Base):
     __tablename__ = "orders"
     ...
+
 
 # CLI / deploy job
 upgrade_to_head(settings.postgres, script_location="alembic")
@@ -751,18 +770,18 @@ services that cannot, and it additionally makes readiness tell the truth.
 Any code can ask, including gRPC servicers and workers:
 
 ```python
-from pycommon import is_draining, begin_draining
+from py_common import is_draining, begin_draining
 ```
 
 ## Pagination
 
-`Page` / `PageMeta` and the cursor codec live in `pycommon.http.pagination`; the
+`Page` / `PageMeta` and the cursor codec live in `py_common.http.pagination`; the
 two helpers that turn a `Select` into a `Page` live in
-`pycommon.persistence.pagination`, because they take a session rather than a
+`py_common.persistence.pagination`, because they take a session rather than a
 request and are just as useful from a worker or a CLI job.
 
 ```python
-from pycommon.persistence import paginate_cursor, paginate_offset
+from py_common.persistence import paginate_cursor, paginate_offset
 
 page = await paginate_offset(session, select(User), limit=20, offset=40)
 page = await paginate_cursor(session, select(User), key_column=User.id, limit=20, cursor=cursor)
@@ -794,7 +813,8 @@ once it is not.
 ## ORM mixins
 
 ```python
-from pycommon.persistence import Base, SoftDeleteMixin, TimestampMixin, UUIDv7PrimaryKeyMixin
+from py_common.persistence import Base, SoftDeleteMixin, TimestampMixin, UUIDv7PrimaryKeyMixin
+
 
 class User(Base, UUIDv7PrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "users"
@@ -912,7 +932,7 @@ defaults — `profile` and `email` still arrive.
 > scope in the file.
 
 For user-facing flows the front end requests the scope in its authorization
-request; pycommon is not involved.
+request; py-common is not involved.
 
 ### What `verify_aud` actually checks
 
@@ -920,7 +940,7 @@ Worth knowing before you rely on it, and pinned by
 `tests/integration/test_keycloak_integration.py`:
 
 Keycloak fills `aud` from the clients the **subject holds roles on**, not from
-the client that requested the token — that one is `azp`, which pycommon does not
+the client that requested the token — that one is `azp`, which py-common does not
 check. So `KEYCLOAK__VERIFY_AUD=true` does **not** establish that a token was
 issued to your client: any other client in the realm can obtain one your API
 will accept, for any user holding a role on your API.

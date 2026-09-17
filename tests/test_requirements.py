@@ -14,8 +14,8 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
-from pycommon.security import Auth, Custom, HasRole, HasScope, Requirement, TokenClaims
-from pycommon.security.requirements import AllOf, AnyOf
+from py_common.security import Auth, Custom, HasRole, HasScope, Requirement, TokenClaims
+from py_common.security.requirements import AllOf, AnyOf
 
 
 class _StubValidator:
@@ -106,7 +106,7 @@ def test_custom_reads_the_raw_payload() -> None:
     """The escape hatch for claims this library does not model.
 
     This is what a deployment with a permissions mapper uses, which is why
-    pycommon ships no HasPermission of its own.
+    py_common ships no HasPermission of its own.
     """
     requirement = Custom(
         lambda c: "orders:write" in c.raw.get("permissions", []),

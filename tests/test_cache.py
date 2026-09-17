@@ -6,7 +6,7 @@ import pytest
 from fakeredis import FakeAsyncRedis
 from redis.exceptions import RedisError
 
-from pycommon.cache import (
+from py_common.cache import (
     InMemoryRateLimiter,
     LockAcquireError,
     RedisRateLimiter,
@@ -14,7 +14,7 @@ from pycommon.cache import (
     create_redis,
     redis_lock,
 )
-from pycommon.config import RedisSettings
+from py_common.config import RedisSettings
 
 
 @pytest.fixture
@@ -71,7 +71,7 @@ async def test_rate_limit_dependency() -> None:
     from fastapi import Depends, FastAPI
     from fastapi.testclient import TestClient
 
-    from pycommon.http.middleware.rate_limit import build_rate_limit_dep
+    from py_common.http.middleware.rate_limit import build_rate_limit_dep
 
     limiter = InMemoryRateLimiter()
     dep = build_rate_limit_dep(limiter, times=2, seconds=60)
@@ -98,7 +98,7 @@ async def test_auto_extend_loop_never_propagates() -> None:
     """
     from unittest.mock import AsyncMock
 
-    from pycommon.cache.lock import _auto_extend_loop
+    from py_common.cache.lock import _auto_extend_loop
 
     lock = AsyncMock()
     lock.extend.side_effect = ConnectionError("redis down")
@@ -118,7 +118,7 @@ async def test_lock_released_when_extend_task_dies(
     finally block, so lock.release() never ran and the key stayed held for the
     whole TTL while the original exception was replaced by a Redis one.
     """
-    import pycommon.cache.lock as lock_module
+    import py_common.cache.lock as lock_module
 
     async def dying_loop(lock: object, ttl_seconds: float, key: str) -> None:
         raise ConnectionError("redis down")
@@ -136,7 +136,7 @@ async def test_original_error_survives_failing_extend_task(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The block's own exception must reach the caller, not the infra one."""
-    import pycommon.cache.lock as lock_module
+    import py_common.cache.lock as lock_module
 
     async def dying_loop(lock: object, ttl_seconds: float, key: str) -> None:
         raise ConnectionError("redis down")
@@ -166,14 +166,14 @@ async def test_original_error_survives_failing_extend_task(
     ],
 )
 def test_parse_rate(rate: object, expected: tuple[int, float]) -> None:
-    from pycommon.cache import parse_rate
+    from py_common.cache import parse_rate
 
     assert parse_rate(rate) == expected  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize("rate", ["", "abc", "100/", "100/fortnight", "0/minute", "-1/minute"])
 def test_parse_rate_rejects_garbage(rate: str) -> None:
-    from pycommon.cache import parse_rate
+    from py_common.cache import parse_rate
 
     with pytest.raises(ValueError):
         parse_rate(rate)
@@ -266,7 +266,7 @@ async def test_rate_limit_dependency_emits_headers() -> None:
     from fastapi import Depends, FastAPI
     from fastapi.testclient import TestClient
 
-    from pycommon.http.middleware.rate_limit import build_rate_limit_dep
+    from py_common.http.middleware.rate_limit import build_rate_limit_dep
 
     dep = build_rate_limit_dep(InMemoryRateLimiter(), "2/minute")
     app = FastAPI()
@@ -291,7 +291,7 @@ async def test_rate_limit_dependency_emits_headers() -> None:
 
 
 def test_rate_limit_dep_requires_a_rate() -> None:
-    from pycommon.http.middleware.rate_limit import build_rate_limit_dep
+    from py_common.http.middleware.rate_limit import build_rate_limit_dep
 
     with pytest.raises(ValueError, match="Pass a rate"):
         build_rate_limit_dep(InMemoryRateLimiter())

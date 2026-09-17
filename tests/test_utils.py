@@ -6,8 +6,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from pycommon.testing.fakes import FakeUnitOfWork, InMemoryRepository
-from pycommon.utils import (
+from py_common.testing.fakes import FakeUnitOfWork, InMemoryRepository
+from py_common.utils import (
     ALPHABET_NUMERIC,
     ALPHABET_UPPER_NUMERIC,
     AsyncCircuitBreaker,

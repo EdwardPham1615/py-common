@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to pycommon are recorded here. This library is shared by
+All notable changes to py-common are recorded here. This library is shared by
 multiple services, so every breaking change carries a migration note.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
@@ -9,6 +9,34 @@ versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+
+- **BREAKING** — the distribution is renamed `pycommon` → **`py-common`**, and
+  the import package `pycommon` → **`py_common`**.
+
+  ```python
+  # before
+  from pycommon.security import Auth
+
+  # after
+  from py_common.security import Auth
+  ```
+
+  ```toml
+  # before
+  dependencies = ["pycommon[all] @ git+https://github.com/EdwardPham1615/pycommon.git@v0.1.0"]
+  # after
+  dependencies = ["py-common[all] @ git+https://github.com/EdwardPham1615/pycommon.git@v0.1.0"]
+  ```
+
+  The repository URL is unchanged; only the package name moved. Note the two
+  spellings: `py-common` wherever a distribution is named (install commands,
+  extras, error messages telling you what to install), `py_common` wherever
+  Python is — a hyphen is not a valid identifier.
+
+  Why: `pycommon` is taken on PyPI by an unrelated project, so `pip install
+  pycommon` fetches a stranger's package, and tooling reported spurious updates
+  for it. `py-common` and `py_common` are both unclaimed.
+
 
 - **BREAKING** — `requires-python` is now `>=3.14`, up from `>=3.13`. A service
   on 3.13 cannot install this version; upgrade the service's interpreter, or
@@ -61,7 +89,7 @@ versioning follows [Semantic Versioning](https://semver.org/).
   (realm and client roles as one set).
 - `HTTP__INTERNAL_API_KEY` guards `internal_router` with an `X-API-Key` header.
   Unset installs no check, which the router logs at construction.
-- `pycommon.testing.routes.assert_routes_protected(app, ...)` fails a consuming
+- `py_common.testing.routes.assert_routes_protected(app, ...)` fails a consuming
   service's test suite, naming every operation that declares no security scheme.
   Requires the `http` extra.
 - `issue_test_token(..., scopes=[...])`.
@@ -75,12 +103,15 @@ versioning follows [Semantic Versioning](https://semver.org/).
   # before
   get_current_user, require_roles = create_auth_deps(validator)
 
+
   @app.get("/me", dependencies=[Depends(get_current_user)])
   async def me(): ...
+
 
   # after
   auth = Auth(validator)
   api = protected_router(auth, prefix="/api/v1")
+
 
   @api.get("/me")
   async def me(): ...

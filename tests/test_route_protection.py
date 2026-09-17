@@ -13,10 +13,10 @@ import pytest
 from fastapi import APIRouter, Depends, FastAPI
 from fastapi.testclient import TestClient
 
-from pycommon.config import BaseAppSettings, HttpSettings
-from pycommon.http.middleware import apply_standard_middleware
-from pycommon.http.problem import register_exception_handlers
-from pycommon.security import (
+from py_common.config import BaseAppSettings, HttpSettings
+from py_common.http.middleware import apply_standard_middleware
+from py_common.http.problem import register_exception_handlers
+from py_common.security import (
     INTERNAL_API_KEY_HEADER,
     Auth,
     HasRole,
@@ -24,7 +24,7 @@ from pycommon.security import (
     internal_router,
     protected_router,
 )
-from pycommon.testing.routes import PYCOMMON_PUBLIC_PREFIXES, assert_routes_protected
+from py_common.testing.routes import PYCOMMON_PUBLIC_PREFIXES, assert_routes_protected
 
 BEARER = {"Authorization": "Bearer tok"}
 API_KEY = "s3cr3t-key-value"
@@ -313,13 +313,13 @@ def test_audit_reports_an_internal_router_left_without_a_key(auth: Auth) -> None
     assert "GET /internal/jobs" in str(exc.value)
 
 
-def test_pycommon_own_routers_are_not_exempt_by_default(auth: Auth) -> None:
+def test_py_common_own_routers_are_not_exempt_by_default(auth: Auth) -> None:
     """There is no implicit allowlist -- not even for health probes.
 
     A default that quietly excused ``/health`` would excuse anything a future
     version of this library mounts under it.
     """
-    from pycommon.http.health import build_health_router
+    from py_common.http.health import build_health_router
 
     app = _mixed_app(auth, internal_api_key=API_KEY)
     app.include_router(build_health_router())

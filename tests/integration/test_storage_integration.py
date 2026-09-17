@@ -15,7 +15,7 @@ import httpx
 import pytest
 from botocore.exceptions import ClientError
 
-from pycommon.storage import ObjectStorageClient
+from py_common.storage import ObjectStorageClient
 
 pytestmark = pytest.mark.integration
 

@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 
 from fastapi import FastAPI
 
-from pycommon.config import ProfilerSettings
-from pycommon.telemetry.profiler import enable_profiler
+from py_common.config import ProfilerSettings
+from py_common.telemetry.profiler import enable_profiler
 
 
 def test_profiler_noop_when_disabled() -> None:
@@ -18,7 +18,7 @@ def test_profiler_noop_when_disabled() -> None:
 def test_profiler_noop_when_package_missing() -> None:
     app = FastAPI()
     with patch(
-        "pycommon.telemetry.profiler.enable_profiler.__module__",
+        "py_common.telemetry.profiler.enable_profiler.__module__",
         create=True,
     ):
         # Patch the import inside enable_profiler

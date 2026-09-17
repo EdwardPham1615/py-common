@@ -8,28 +8,28 @@ def test_import_package() -> None:
     ``pyproject.toml`` — and this assertion does not need editing every release."""
     from importlib.metadata import version
 
-    import pycommon
+    import py_common
 
-    assert pycommon.__version__ == version("pycommon")
-    assert pycommon.__version__ != "0.0.0+unknown"
+    assert py_common.__version__ == version("py_common")
+    assert py_common.__version__ != "0.0.0+unknown"
 
 
 def test_import_config() -> None:
-    from pycommon.config import BaseAppSettings, Environment
+    from py_common.config import BaseAppSettings, Environment
 
     assert Environment.DEV == "dev"
     assert BaseAppSettings is not None
 
 
 def test_import_logging() -> None:
-    from pycommon.logging import get_logger, setup_logging
+    from py_common.logging import get_logger, setup_logging
 
     assert callable(setup_logging)
     assert callable(get_logger)
 
 
 def test_import_telemetry() -> None:
-    from pycommon.telemetry import (
+    from py_common.telemetry import (
         enable_profiler,
         instrument_sqlalchemy,
         setup_telemetry,
@@ -43,7 +43,7 @@ def test_import_telemetry() -> None:
 
 
 def test_import_security() -> None:
-    from pycommon.security import (
+    from py_common.security import (
         Auth,
         ClientCredentialsTokenProvider,
         HasRole,
@@ -64,20 +64,20 @@ def test_import_security() -> None:
 
 
 def test_import_storage() -> None:
-    from pycommon.storage import ObjectStorageClient
+    from py_common.storage import ObjectStorageClient
 
     assert ObjectStorageClient is not None
 
 
 def test_import_errors() -> None:
-    from pycommon.errors import AppError, ErrorCode, problem_type_uri
+    from py_common.errors import AppError, ErrorCode, problem_type_uri
 
     assert AppError.input().error_code is ErrorCode.INPUT
     assert problem_type_uri(ErrorCode.INPUT) == "/problems/input"
 
 
 def test_import_http() -> None:
-    from pycommon.http import (
+    from py_common.http import (
         ApiResponse,
         HealthCheck,
         Page,
@@ -101,12 +101,12 @@ def test_import_http() -> None:
 
 
 def test_import_http_middleware() -> None:
-    from pycommon.http.middleware import (
+    from py_common.http.middleware import (
         RequestContextMiddleware,
         SecurityHeadersMiddleware,
         apply_standard_middleware,
     )
-    from pycommon.http.middleware.rate_limit import build_rate_limit_dep
+    from py_common.http.middleware.rate_limit import build_rate_limit_dep
 
     assert RequestContextMiddleware is not None
     assert SecurityHeadersMiddleware is not None
@@ -115,7 +115,7 @@ def test_import_http_middleware() -> None:
 
 
 def test_import_cache() -> None:
-    from pycommon.cache import (
+    from py_common.cache import (
         InMemoryRateLimiter,
         RedisRateLimiter,
         create_redis,
@@ -129,7 +129,7 @@ def test_import_cache() -> None:
 
 
 def test_import_runtime() -> None:
-    from pycommon.runtime import (
+    from py_common.runtime import (
         GrpcChannelPool,
         GrpcServer,
         LifespanResource,
@@ -151,8 +151,8 @@ def test_import_runtime() -> None:
 
 
 def test_import_persistence() -> None:
-    from pycommon.config import DatabaseSettings
-    from pycommon.persistence import (
+    from py_common.config import DatabaseSettings
+    from py_common.persistence import (
         Base,
         Repository,
         SqlAlchemyRepository,
@@ -182,7 +182,7 @@ def test_import_persistence() -> None:
 
 
 def test_import_utils() -> None:
-    from pycommon.utils import (
+    from py_common.utils import (
         AsyncCircuitBreaker,
         FixedClock,
         new_nanoid,
@@ -202,14 +202,14 @@ def test_import_utils() -> None:
 
 
 def test_import_config_profiler_settings() -> None:
-    from pycommon.config import ProfilerSettings
+    from py_common.config import ProfilerSettings
 
     assert ProfilerSettings().enabled is False
 
 
 def test_import_testing() -> None:
-    from pycommon.testing.fakes import FakeUnitOfWork, InMemoryRepository
-    from pycommon.testing.tokens import generate_rsa_keypair, issue_test_token
+    from py_common.testing.fakes import FakeUnitOfWork, InMemoryRepository
+    from py_common.testing.tokens import generate_rsa_keypair, issue_test_token
 
     assert FakeUnitOfWork is not None
     assert InMemoryRepository is not None
@@ -219,7 +219,7 @@ def test_import_testing() -> None:
 
 def test_error_code_registry_covers_new_statuses() -> None:
     """Every non-OK ErrorCode must be resolvable to a problem type and URI."""
-    from pycommon.errors import PROBLEM_TYPES, ErrorCode, problem_type_uri
+    from py_common.errors import PROBLEM_TYPES, ErrorCode, problem_type_uri
 
     for code in ErrorCode:
         if code is ErrorCode.OK:
@@ -232,7 +232,7 @@ def test_error_code_registry_covers_new_statuses() -> None:
 
 
 def test_error_code_for_status_mapping() -> None:
-    from pycommon.errors import ErrorCode, error_code_for_status
+    from py_common.errors import ErrorCode, error_code_for_status
 
     assert error_code_for_status(401) is ErrorCode.AUTH
     # 403 resolves to FORBIDDEN, not APP_CHECK, even though both are 403.
@@ -245,7 +245,7 @@ def test_error_code_for_status_mapping() -> None:
 
 
 def test_app_error_factories_use_registry_status() -> None:
-    from pycommon.errors import PROBLEM_TYPES, AppError
+    from py_common.errors import PROBLEM_TYPES, AppError
 
     for factory, code in (
         (AppError.forbidden, "FORBIDDEN"),

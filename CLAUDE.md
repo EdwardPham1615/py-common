@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`pycommon` is a shared platform library (config, logging, telemetry, security,
+`py_common` is a shared platform library (config, logging, telemetry, security,
 storage, HTTP helpers, runtime, persistence, cache, utils) for internal FastAPI
 services, installed by pinning a git tag. It is *not* an application — there is
 no domain logic here.
@@ -28,7 +28,7 @@ make install          # uv sync --extra all --extra dev
 make check            # lint + format-check + mypy --strict + test-cov — run before pushing
 make lint             # ruff check src tests
 make format           # ruff format (writes)
-make typecheck        # mypy --strict on src/pycommon
+make typecheck        # mypy --strict on src/py_common
 make test             # pytest
 make test-cov         # pytest with coverage (fails under 85%, see pyproject.toml)
 make infra-up         # docker compose: Redis, Postgres, Jaeger, MinIO, Keycloak (waits until healthy)
@@ -101,13 +101,13 @@ keypair with the issuer and audience the validator already expects.
 
 ### Package/extras split
 
-Each subpackage under `src/pycommon/` maps to an optional dependency extra in
+Each subpackage under `src/py_common/` maps to an optional dependency extra in
 `pyproject.toml` (`http`, `storage`, `security`, `telemetry`, `grpc`,
 `runtime`, `persistence`, `migrations`, `cache`, `profiling`; `all` pulls in
 everything, `dev` is tooling only). Only `pydantic`/`pydantic-settings`/
 `python-dotenv`/`structlog`/`ecs-logging`/`opentelemetry-api`/`anyio`/
 `tenacity` are always installed. **Import optional-dependency modules only inside the code path
-that needs them** — a consumer installing `pycommon[http]` must not be forced
+that needs them** — a consumer installing `py-common[http]` must not be forced
 to have `aioboto3` or `grpcio` importable. This is the load-bearing
 constraint behind the module boundaries; when adding a feature, put it in the
 subpackage matching the extra it needs, don't add a new top-level dependency
@@ -130,7 +130,7 @@ without gating it behind an extra.
 | `persistence` | Engine/sessionmaker, structured query logging, `Base` + naming convention, thin Alembic helpers, `Repository`/`UnitOfWork` |
 | `utils` | `retry_async` (tenacity), `new_nanoid`/`new_uuid7`, `Clock`/`FixedClock`, `AsyncCircuitBreaker` |
 | `testing` | `FakeUnitOfWork`, `InMemoryRepository`, JWT test-token factory, `assert_routes_protected` — the doubles and assertions this library ships for *consumers* to test against |
-| `lifecycle` (top-level module) | Process-wide draining flag (`begin_draining`/`is_draining`/`reset_draining`), shared by the HTTP and gRPC layers so both stop accepting traffic together. The only thing `pycommon/__init__.py` re-exports besides `__version__`. |
+| `lifecycle` (top-level module) | Process-wide draining flag (`begin_draining`/`is_draining`/`reset_draining`), shared by the HTTP and gRPC layers so both stop accepting traffic together. The only thing `py-common/__init__.py` re-exports besides `__version__`. |
 
 Read README.md's "Quick usage" and per-topic sections
 (Idempotency keys, Request body limits, Request timeouts, Graceful
@@ -180,7 +180,7 @@ inconsistent:
   ORM cascades or fire `before_delete`/`after_delete`. Express deletes as
   DB-level `ON DELETE CASCADE`, or override `delete()`.
 - **When you extend an interface in a real module, extend its fake in
-  `pycommon.testing.fakes` in the same PR** — otherwise the fake silently
+  `py_common.testing.fakes` in the same PR** — otherwise the fake silently
   stops being a faithful substitute and consumer test suites lose coverage
   without any test failing.
 
@@ -206,7 +206,7 @@ code, so treat these as closed unless something new contradicts them:
   for this library (not for services). Reasons are written up in README's
   "Libraries we deliberately don't vendor"; the ideas worth taking from the
   Redis SDK — fail-open with a `degraded` flag, the `"100/minute"` rate DSL,
-  `X-RateLimit-*` headers — are already implemented in `pycommon.cache`.
+  `X-RateLimit-*` headers — are already implemented in `py_common.cache`.
 - **The gRPC request-ID interceptor wraps the handler behavior, not the
   lookup.** `intercept_service` only resolves a handler and returns before it
   runs, and the old `bind_contextvars` there was never unwound, so a request ID
@@ -256,7 +256,7 @@ code, so treat these as closed unless something new contradicts them:
   design, not our bug.** Measured against a real 26.7 server in
   `tests/integration/test_keycloak_integration.py`: Keycloak fills `aud` from
   the clients the *subject holds roles on*, not from the client that requested
-  the token — that one is `azp`, which pycommon does not check. So a token
+  the token — that one is `azp`, which py-common does not check. So a token
   obtained by any other client in the realm is accepted for any user holding a
   role on ours. What `verify_aud=True` does reject is a subject with no role on
   our client, who gets `aud: "account"` and a bare "Invalid or expired token".

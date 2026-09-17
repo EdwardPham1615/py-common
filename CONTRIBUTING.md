@@ -1,4 +1,4 @@
-# Contributing to pycommon
+# Contributing to py-common
 
 This library is shared by several services. A bug here is a bug in all of them
 at once, and a breaking change here is an upgrade someone else has to absorb.
@@ -137,7 +137,7 @@ checks the password — and a credential-handling bug passes locally while faili
 in CI, which is exactly how one was found. Forcing `scram-sha-256` makes a local
 run agree with CI.
 
-`pycommon.testing.fakes` holds the in-memory doubles this library ships for its
+`py_common.testing.fakes` holds the in-memory doubles this library ships for its
 *consumers*. When you extend an interface, extend the fake in the same PR —
 otherwise the fake quietly stops being a substitute for the real thing, and
 every service that tests against it loses coverage without any test turning
@@ -157,13 +157,13 @@ These come up in review often enough to write down:
   leaks, and unbounded metric labels become a bill.
 - **Optional dependencies stay optional.** Anything beyond the base install
   belongs in an extra in `pyproject.toml`, imported inside the module that needs
-  it. Consumers install `pycommon[http]`, not the whole world.
+  it. Consumers install `py-common[http]`, not the whole world.
 - **No secrets in logs or error messages**, including in exception context.
 - Follow the shape of the code around you before introducing a new pattern.
 
 ## Reporting bugs
 
-Include the pycommon version (the tag you pinned), what you expected, what
+Include the py-common version (the tag you pinned), what you expected, what
 happened, and the smallest reproduction you can manage. If it involves a
 downstream service, say which extras you installed.
 

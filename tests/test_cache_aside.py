@@ -10,7 +10,7 @@ from fakeredis import FakeAsyncRedis
 from pydantic import BaseModel
 from redis.exceptions import RedisError
 
-from pycommon.cache import Cache, cached, pydantic_serializer
+from py_common.cache import Cache, cached, pydantic_serializer
 
 
 @pytest.fixture

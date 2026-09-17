@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
-from pycommon.config import (
+from py_common.config import (
     BaseAppSettings,
     CorsSettings,
     DatabaseSettings,
@@ -24,7 +24,7 @@ from pycommon.config import (
     get_environment,
     resolve_env_files,
 )
-from pycommon.config.environment import resolve_environment
+from py_common.config.environment import resolve_environment
 
 
 class _Settings(BaseAppSettings):
@@ -270,11 +270,11 @@ def test_every_exported_settings_group_is_checked() -> None:
     """SETTINGS_GROUPS is written by hand, so it needs its own guard.
 
     The drift tests below only see the classes listed in it. A new group added
-    to ``pycommon.config`` and forgotten here would have every one of its keys
+    to ``py_common.config`` and forgotten here would have every one of its keys
     missing from .env.example with the suite still green -- which is exactly
     the drift those tests exist to catch.
     """
-    import pycommon.config as config
+    import py_common.config as config
 
     exported_groups = {
         getattr(config, name)

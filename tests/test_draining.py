@@ -10,9 +10,9 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from pycommon.http import HealthCheck, build_health_router
-from pycommon.lifecycle import begin_draining, is_draining, reset_draining
-from pycommon.runtime.uvicorn import DrainingServer, run_uvicorn
+from py_common.http import HealthCheck, build_health_router
+from py_common.lifecycle import begin_draining, is_draining, reset_draining
+from py_common.runtime.uvicorn import DrainingServer, run_uvicorn
 
 
 @pytest.fixture(autouse=True)
@@ -151,7 +151,7 @@ def test_no_drain_delay_runs_uvicorn_directly(monkeypatch: pytest.MonkeyPatch) -
     captured: dict[str, object] = {}
     monkeypatch.setattr(uvicorn, "run", lambda app, **kw: captured.update(app=app, **kw))
     monkeypatch.setattr(
-        "pycommon.runtime.uvicorn.DrainingServer",
+        "py_common.runtime.uvicorn.DrainingServer",
         lambda *a, **kw: pytest.fail("DrainingServer must not be built without a drain delay"),
     )
 
@@ -178,7 +178,7 @@ def test_drain_delay_builds_a_draining_server(monkeypatch: pytest.MonkeyPatch) -
         async def serve(self, sockets: object = None) -> None:
             served.append(self)
 
-    monkeypatch.setattr("pycommon.runtime.uvicorn.DrainingServer", _Recorder)
+    monkeypatch.setattr("py_common.runtime.uvicorn.DrainingServer", _Recorder)
     monkeypatch.setattr(uvicorn, "run", lambda *a, **kw: pytest.fail("should not be reached"))
 
     run_uvicorn("main:app", host="127.0.0.1", port=9002, drain_delay_seconds=7.5)
@@ -217,12 +217,12 @@ def test_run_from_settings_passes_the_whole_server_group(
     """The reason ServerSettings exists: an operator changes
     SERVER__DRAIN_DELAY_SECONDS instead of asking for a release. That only holds
     if every field actually reaches uvicorn."""
-    from pycommon.config import ServerSettings
-    from pycommon.runtime.uvicorn import run_from_settings
+    from py_common.config import ServerSettings
+    from py_common.runtime.uvicorn import run_from_settings
 
     captured: dict[str, object] = {}
     monkeypatch.setattr(
-        "pycommon.runtime.uvicorn.run_uvicorn",
+        "py_common.runtime.uvicorn.run_uvicorn",
         lambda app, **kw: captured.update(app=app, **kw),
     )
 

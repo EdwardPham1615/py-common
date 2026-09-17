@@ -1,6 +1,6 @@
 ---
 name: Feature request
-about: Something pycommon should do and does not
+about: Something py-common should do and does not
 labels: enhancement
 ---
 

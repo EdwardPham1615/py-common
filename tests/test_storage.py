@@ -7,8 +7,8 @@ from typing import Any, Self
 import pytest
 from botocore.exceptions import ClientError
 
-from pycommon.config import StorageSettings
-from pycommon.storage import ObjectStorageClient
+from py_common.config import StorageSettings
+from py_common.storage import ObjectStorageClient
 
 
 class _FakeStream:
