@@ -830,6 +830,66 @@ make check        # lint + format check + mypy --strict + tests (what CI runs)
 branching, commit and pull-request conventions, and [RELEASING.md](RELEASING.md)
 for cutting a release.
 
+### Integration tests
+
+`tests/integration` runs against real Redis, Postgres, Jaeger, MinIO and
+Keycloak. Each group skips unless its environment variable is set, so a plain
+`make test` stays offline.
+
+```bash
+make infra-up                 # starts all five, waits until healthy
+make test-integration-local   # runs the suite against them
+make infra-down               # stops them and deletes the data
+```
+
+Point them only at throwaway instances: the Redis fixture calls `FLUSHDB`, the
+Postgres one drops and recreates its tables, and the Keycloak realm is
+re-imported from scratch.
+
+### Working on the Keycloak fixture
+
+The realm lives in `tests/integration/keycloak-realm.json` and is imported when
+the container starts, so there is no setup step — `make infra-up` is all of it.
+Admin console at <http://localhost:8080>, `admin` / `admin`; realm
+`pycommon-test`; test user `alice` / `alice-password`.
+
+It holds two clients that differ by exactly one thing — a dedicated audience
+mapper — because that difference is what the audience tests are built on. It is
+hand-written and minimal rather than a Keycloak export: an export of this same
+realm is over 2700 lines of defaults, and the file's job is to let a reviewer
+*see* that one difference.
+
+After editing it:
+
+```bash
+make infra-down && make infra-up
+```
+
+`--import-realm` **skips a realm that already exists**, so `docker compose
+restart` would quietly keep testing the old one. `make infra-down` uses
+`down -v`, which is what clears it.
+
+`make keycloak-export` dumps the *running* realm to `/tmp` — for answering
+"what did Keycloak make of what I wrote" when a claim does not come out as
+expected. It never touches the fixture.
+
+### What `verify_aud` actually checks
+
+Worth knowing before you rely on it, and pinned by
+`tests/integration/test_keycloak_integration.py`:
+
+Keycloak fills `aud` from the clients the **subject holds roles on**, not from
+the client that requested the token — that one is `azp`, which pycommon does not
+check. So `KEYCLOAK__VERIFY_AUD=true` does **not** establish that a token was
+issued to your client: any other client in the realm can obtain one your API
+will accept, for any user holding a role on your API.
+
+What it does reject is a subject with no role on your client at all. Keycloak
+emits `aud: "account"` for them, and the token fails as "Invalid or expired
+token" with nothing in the message pointing at the audience — the confusing
+day-one 401 against an untuned realm. A dedicated audience mapper on your client
+puts your `clientId` in `aud` regardless of roles, which is worth adding.
+
 ## License
 
 [MIT](LICENSE) © 2026 Hieu Pham Trung.
