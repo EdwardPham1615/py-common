@@ -873,6 +873,40 @@ restart` would quietly keep testing the old one. `make infra-down` uses
 "what did Keycloak make of what I wrote" when a claim does not come out as
 expected. It never touches the fixture.
 
+### Scoping a service token
+
+`HasScope` reads the standard OAuth2 `scope` claim, and out of the box a
+Keycloak token carries only its client's default scopes — `profile email`. So a
+rule like `HasScope("orders:write")` denies everyone until two things are true:
+
+**1. The scope exists in the realm and is optional on the client.** Create a
+client scope named `orders:write`, then assign it to the client under *Optional*
+— not *Default*. Optional means it is granted only when asked for, which is what
+makes the scope narrow anything at all. Keycloak answers `invalid_scope` for a
+scope no client scope defines, so this step cannot be skipped.
+
+**2. The caller asks for it.** For service-to-service calls that is
+`KEYCLOAK__TOKEN_SCOPE`, which `ClientCredentialsTokenProvider` sends with the
+grant:
+
+```bash
+KEYCLOAK__TOKEN_SCOPE="orders:write orders:read"
+```
+
+Unset, no `scope` parameter is sent and the request is byte-identical to what it
+was before the setting existed. Asking for one scope does not narrow away the
+defaults — `profile` and `email` still arrive.
+
+> **If you script the realm:** declaring `clientScopes` in a realm-import JSON
+> **replaces Keycloak's entire built-in set** rather than adding to it. Doing
+> that drops `profile`, `email` and `roles`, and tokens then come back with no
+> `realm_access` at all — valid, and authorising nothing. Add client scopes
+> through the admin console or the Admin API instead, or carry every built-in
+> scope in the file.
+
+For user-facing flows the front end requests the scope in its authorization
+request; pycommon is not involved.
+
 ### What `verify_aud` actually checks
 
 Worth knowing before you rely on it, and pinned by

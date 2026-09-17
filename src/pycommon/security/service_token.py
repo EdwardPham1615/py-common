@@ -15,6 +15,11 @@ from pycommon.config import KeycloakSettings
 class ClientCredentialsTokenProvider:
     """Fetches and caches a service-account access token for outbound calls.
 
+    Requests ``KEYCLOAK__TOKEN_SCOPE`` when one is set. Without it the token
+    carries only the client's default scopes, so a ``HasScope`` rule naming a
+    business scope can never pass for a service-to-service caller — the reason
+    that setting exists.
+
     Usage::
 
         provider = ClientCredentialsTokenProvider(settings.keycloak)
@@ -32,14 +37,21 @@ class ClientCredentialsTokenProvider:
             if self._token is not None and time.monotonic() < self._expires_at:
                 return self._token
 
+            form = {
+                "grant_type": "client_credentials",
+                "client_id": self.settings.client_id,
+                "client_secret": self.settings.client_secret,
+            }
+            # Omitted entirely when unset, rather than sent empty: the request
+            # then stays byte-identical to what it has always been, and a
+            # deployment that never configures a scope sees no change.
+            if self.settings.token_scope:
+                form["scope"] = self.settings.token_scope
+
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
                     self.settings.token_url,
-                    data={
-                        "grant_type": "client_credentials",
-                        "client_id": self.settings.client_id,
-                        "client_secret": self.settings.client_secret,
-                    },
+                    data=form,
                     timeout=10.0,
                 )
                 resp.raise_for_status()

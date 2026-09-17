@@ -263,6 +263,16 @@ class KeycloakSettings(BaseModel):
     jwks_cache_ttl_seconds: int = 3600
     verify_aud: bool = True
 
+    # Scopes to request with the client_credentials grant, space-separated.
+    # Unset sends no `scope` parameter, which is what every deployment does
+    # today -- a service-account token then carries only the client's default
+    # scopes, and no HasScope rule for a business scope can ever pass.
+    #
+    # Each value has to exist as a client scope in the realm and be assigned to
+    # this client as an *optional* one; Keycloak answers `invalid_scope`
+    # otherwise. See README's "Scoping a service token".
+    token_scope: str | None = None
+
     @property
     def issuer(self) -> str:
         return f"{self.server_url.rstrip('/')}/realms/{self.realm}"

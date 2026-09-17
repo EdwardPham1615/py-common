@@ -334,26 +334,53 @@ def test_rejections_are_problem_details_all_the_way_through(
     assert forbidden.headers["X-Request-ID"]
 
 
-def test_has_scope_cannot_authorise_anything_a_service_would_want_today(
+async def test_a_requested_scope_reaches_a_has_scope_rule(
+    keycloak_settings: Any,
+) -> None:
+    """The path ``KEYCLOAK__TOKEN_SCOPE`` exists to open, end to end.
+
+    ``phone`` rather than a business scope like ``orders:write``, and the choice
+    is worth explaining: declaring ``clientScopes`` in a realm import
+    **replaces Keycloak's entire built-in set**, not adds to it. Doing that here
+    wiped ``profile``, ``email`` and — fatally — ``roles``, so tokens came back
+    with no ``realm_access`` at all. Keeping the defaults would mean
+    transplanting every one of them, with their mappers, into the fixture: the
+    thousand-line file this realm is hand-written to avoid being. ``phone`` is
+    an optional scope Keycloak already assigns to every client, so it exercises
+    exactly the same mechanism for free. README's "Scoping a service token"
+    documents the real setup, including this trap.
+    """
+    scoped = keycloak_settings.model_copy(update={"token_scope": "phone"})
+    validator = KeycloakTokenValidator(settings=scoped)
+
+    unscoped_claims = validator.decode(
+        await ClientCredentialsTokenProvider(settings=keycloak_settings).get_token()
+    )
+    scoped_claims = validator.decode(
+        await ClientCredentialsTokenProvider(settings=scoped).get_token()
+    )
+
+    assert not HasScope("phone").check(unscoped_claims)
+    assert HasScope("phone").check(scoped_claims)
+    # The defaults are still there -- asking for one scope does not narrow away
+    # the rest, so nothing an existing rule relies on is lost.
+    assert {"profile", "email"} <= set(scoped_claims.scopes)
+
+
+def test_has_scope_denies_a_scope_the_caller_never_requested(
     auth_app: FastAPI, alice_headers: dict[str, str], keycloak_url: str
 ) -> None:
-    """Recording a real limitation, not asserting a bug.
+    """The other half: a rule naming a scope nobody asked for denies, as it should.
 
-    A Keycloak token carries only the scopes of the client scopes assigned to
-    the requesting client -- here ``profile email``, nothing else. So
-    ``HasScope("orders:write")`` denies a caller who is, by every other measure,
-    entitled: the same request passes when the rule is ``HasRole(...)``, and the
-    combined ``HasRole | HasScope`` route above passes through the role branch.
+    alice's browser-style token carries only ``profile email``, so
+    ``HasScope("orders:write")`` refuses a caller who is otherwise entitled --
+    the same request passes under ``HasRole``, and the combined
+    ``HasRole | HasScope`` route above passes through the role branch.
 
-    Nor can the caller simply ask: Keycloak answers ``invalid_scope`` for a
-    scope no client scope defines. Making ``HasScope`` usable takes realm
-    configuration (create the client scope, assign it to the client) plus a
-    grant that requests it -- and ``ClientCredentialsTokenProvider`` sends no
-    ``scope`` at all, so service-to-service callers have no route to it.
-
-    Worth stating because ``HasPermission`` was dropped for this exact property.
-    If this test ever goes green, the configuration it needs has been done and
-    the README should say how.
+    And she cannot conjure it: Keycloak answers ``invalid_scope`` for a scope no
+    client scope defines. That is the constraint ``KEYCLOAK__TOKEN_SCOPE``
+    works within rather than around — it asks for scopes the realm already
+    grants this client, which is the whole security value of the mechanism.
     """
     client = TestClient(auth_app)
 
