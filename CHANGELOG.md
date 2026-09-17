@@ -10,6 +10,14 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `KEYCLOAK__ALLOWED_AZP` — client ids allowed to have obtained the token, read
+  from the `azp` claim and checked by `KeycloakTokenValidator`. Empty (the
+  default) accepts any, so nothing changes until it is set. This is the check
+  `verify_aud` is widely assumed to perform and does not: Keycloak fills `aud`
+  from the clients the *subject holds roles on*, so any client in the realm can
+  obtain a token your API accepts for any user holding a role there. A token
+  with no `azp` is rejected once a list exists.
+
 - `KEYCLOAK__TOKEN_SCOPE` — scopes to request with the `client_credentials`
   grant, sent by `ClientCredentialsTokenProvider`. Unset, no `scope` parameter
   is sent and the request is unchanged. Without it a service-account token

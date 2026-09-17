@@ -379,6 +379,61 @@ def test_any_of_false_requires_every_role(keypair: RsaKeyPair) -> None:
     assert client.get("/both", headers=_bearer_headers(both)).status_code == 200
 
 
+# --- azp: which client obtained the token ---------------------------------
+#
+# `aud` does not answer this. Keycloak fills it from the clients the subject
+# holds roles on, so any client in the realm can obtain a token this API
+# accepts. `allowed_azp` is the way to narrow that, and it is off unless set.
+
+
+def _azp_token(keypair: RsaKeyPair, azp: str | None) -> str:
+    extra = {"azp": azp} if azp is not None else {}
+    return issue_test_token(keypair, issuer=KC.issuer, audience=KC.client_id, extra_claims=extra)
+
+
+def _validator_allowing(keypair: RsaKeyPair, *azp: str) -> KeycloakTokenValidator:
+    validator = _validator_with_key(keypair)
+    validator.settings = KC.model_copy(update={"allowed_azp": list(azp)})
+    return validator
+
+
+def test_azp_is_not_checked_until_a_service_asks_for_it(keypair: RsaKeyPair) -> None:
+    """Off by default. Upgrading must not start rejecting anyone's traffic."""
+    assert _validator_with_key(keypair).decode(_azp_token(keypair, "anything-at-all")).sub
+
+
+def test_a_token_from_an_allowed_client_passes(keypair: RsaKeyPair) -> None:
+    validator = _validator_allowing(keypair, "web-spa", "mobile-app")
+
+    assert validator.decode(_azp_token(keypair, "mobile-app")).sub
+
+
+def test_a_token_from_another_client_in_the_realm_is_rejected(keypair: RsaKeyPair) -> None:
+    """The hole this setting exists to close.
+
+    The token is genuine, correctly signed, and its audience check passes — it
+    was simply obtained by a client this service does not trust.
+    """
+    validator = _validator_allowing(keypair, "web-spa")
+
+    with pytest.raises(HTTPException) as rejected:
+        validator.decode(_azp_token(keypair, "partner-integration"))
+
+    assert rejected.value.status_code == 401
+    assert rejected.value.detail == "Token was not issued to a client this service accepts"
+    # A distinct message on purpose: the audience rejection answers a bare
+    # "Invalid or expired token", which cost real time to diagnose once already.
+    assert rejected.value.headers == {"WWW-Authenticate": "Bearer"}
+
+
+def test_a_token_with_no_azp_is_rejected_once_a_list_exists(keypair: RsaKeyPair) -> None:
+    """Fail closed. A token that will not say where it came from is not on the list."""
+    validator = _validator_allowing(keypair, "web-spa")
+
+    with pytest.raises(HTTPException):
+        validator.decode(_azp_token(keypair, None))
+
+
 # --- service-to-service tokens --------------------------------------------
 #
 # ClientCredentialsTokenProvider is what every outbound service call goes

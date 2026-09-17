@@ -924,6 +924,29 @@ token" with nothing in the message pointing at the audience — the confusing
 day-one 401 against an untuned realm. A dedicated audience mapper on your client
 puts your `clientId` in `aud` regardless of roles, which is worth adding.
 
+**To pin which client obtained the token, use `KEYCLOAK__ALLOWED_AZP`.** `azp`
+is the claim that names the requesting client — the one people expect `aud` to
+be:
+
+```bash
+KEYCLOAK__ALLOWED_AZP='["web-spa","mobile-app"]'
+```
+
+Empty, the default, accepts any, so nothing changes until you set it. Once set, a
+token from a client not on the list is rejected with *"Token was not issued to a
+client this service accepts"*, and so is a token carrying no `azp` at all:
+having declared which clients you trust, one that will not say where it came
+from is not among them.
+
+It is a setting on the validator rather than a `Requirement` because it is
+uniform for the whole service — which clients may reach it at all is a trust
+boundary, not a per-endpoint decision — so it applies to every token, including
+the ones `internal_router` and `optional_user` see.
+
+Weigh it before switching it on. With a single client in the realm it buys
+nothing; `azp` is a claim OIDC defines for ID tokens that Keycloak also puts on
+access tokens; and every legitimate front end has to be listed and kept listed.
+
 ## License
 
 [MIT](LICENSE) © 2026 Hieu Pham Trung.
