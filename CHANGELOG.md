@@ -8,6 +8,28 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING** — `requires-python` is now `>=3.14`, up from `>=3.13`. A service
+  on 3.13 cannot install this version; upgrade the service's interpreter, or
+  stay on a tag published before this change.
+
+  The floor now tracks the current stable release rather than the oldest one
+  still receiving fixes. Python 3.13 left its bugfix window on 2026-10-01 and is
+  security-only until 2029; 3.14 has bugfix support until 2027-10. Nothing in
+  the library needed 3.14 — the whole suite, including the integration group,
+  passes identically on both — so this is a support commitment, not a feature
+  gate, and it is being made now because raising a floor is cheap while nothing
+  consumes the library and expensive once services pin tags.
+
+  Python 3.15 was evaluated and is not usable yet: `psycopg-binary` publishes no
+  `cp315` wheel, and `asyncpg`, `uvloop`, `httptools` and `lupa` have none either
+  — they install only by compiling from source, which a slim container image
+  cannot do. Worth revisiting once those ship.
+
+- `ruff` now targets `py314`, which reformats `except (A, B):` to `except A, B:`
+  (PEP 758). One occurrence today, in `cache/cached.py`.
+
 ### Added
 
 - `KEYCLOAK__ALLOWED_AZP` — client ids allowed to have obtained the token, read

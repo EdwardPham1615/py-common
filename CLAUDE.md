@@ -10,6 +10,10 @@ services, installed by pinning a git tag. It is *not* an application — there i
 no domain logic here.
 
 **Current state: `v0.1.0` shipped 2026-09-13 and no service consumes it yet.**
+**Requires Python 3.14+** — the floor tracks the current stable release, not the
+oldest one still getting security fixes. Nothing here needs 3.14; it is a support
+commitment made while raising it is still free. 3.15 is not usable yet
+(`psycopg-binary` and four others publish no `cp315` wheel).
 That is worth knowing before weighing a breaking change, and worth correcting
 here the moment it stops being true — it is the difference between a rename
 costing one PR and a rename costing somebody an outage. Once services do pin a
