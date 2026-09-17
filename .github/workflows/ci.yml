@@ -70,6 +70,7 @@ jobs:
       S3_TEST_ACCESS_KEY: pycommon
       S3_TEST_SECRET_KEY: pycommon123
       POSTGRES_TEST_DSN: postgresql+asyncpg://pycommon:pycommon@localhost:5432/pycommon_test
+      KEYCLOAK_TEST_URL: http://localhost:8080
 
     steps:
       - uses: actions/checkout@v7
@@ -110,6 +111,30 @@ jobs:
           done
           echo "::error::MinIO never became ready"
           docker logs minio
+          exit 1
+
+      # Not a service container either, and for both of MinIO's reasons at once:
+      # it needs a command (`start-dev --import-realm`) and it needs the realm
+      # fixture from the checked-out tree mounted in. Client ids and secrets
+      # live in that file rather than in this workflow, so the two cannot drift.
+      #
+      # Readiness is the realm's own discovery document, not /health/ready:
+      # that endpoint is on management port 9000, which MinIO above already
+      # holds, and "the realm imported and is being served" is the condition the
+      # tests need. A cold import takes ~15-20s, hence the longer budget.
+      - name: Start Keycloak
+        run: |
+          docker run -d --name keycloak -p 8080:8080 \
+            -e KC_BOOTSTRAP_ADMIN_USERNAME=admin -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
+            -v "$PWD/tests/integration/keycloak-realm.json:/opt/keycloak/data/import/realm.json:ro" \
+            quay.io/keycloak/keycloak:26.7.4 start-dev --import-realm
+          for _ in $(seq 1 60); do
+            curl -sf http://localhost:8080/realms/pycommon-test/.well-known/openid-configuration \
+              >/dev/null && exit 0
+            sleep 2
+          done
+          echo "::error::Keycloak never served the pycommon-test realm"
+          docker logs keycloak
           exit 1
 
       - name: Lint

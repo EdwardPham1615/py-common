@@ -50,9 +50,10 @@ INFRA_ENV := \
 	JAEGER_QUERY_URL=http://localhost:16686 \
 	S3_TEST_ENDPOINT=http://localhost:9000 \
 	S3_TEST_ACCESS_KEY=pycommon \
-	S3_TEST_SECRET_KEY=pycommon123
+	S3_TEST_SECRET_KEY=pycommon123 \
+	KEYCLOAK_TEST_URL=http://localhost:8080
 
-infra-up: ## Start Redis/Postgres/Jaeger/MinIO for the integration suite, wait until healthy
+infra-up: ## Start Redis/Postgres/Jaeger/MinIO/Keycloak for the integration suite, wait until healthy
 	docker compose up -d --wait
 
 infra-down: ## Stop them and delete their data
@@ -63,6 +64,20 @@ infra-logs: ## Tail the service logs
 
 test-integration-local: infra-up ## infra-up, then run the integration suite against it
 	$(INFRA_ENV) $(UV) run pytest tests/integration -v --no-cov
+
+keycloak-export: ## Dump the RUNNING Keycloak realm to /tmp, to diff against the fixture
+	@# Answers "what did Keycloak make of what I wrote" -- the question worth
+	@# asking when a claim does not come out as expected. Writes to /tmp on
+	@# purpose: an export is over a thousand lines of defaults, and overwriting
+	@# the fixture with it would trade a file a reviewer can read for one nobody
+	@# will. Hand-merge what you need.
+	@token=$$(curl -sf -X POST http://localhost:8080/realms/master/protocol/openid-connect/token \
+		-d grant_type=password -d client_id=admin-cli -d username=admin -d password=admin \
+		| python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])') && \
+	curl -sf -X POST -H "Authorization: Bearer $$token" \
+		'http://localhost:8080/admin/realms/pycommon-test/partial-export?exportClients=true&exportGroupsAndRoles=true' \
+		| python3 -m json.tool > /tmp/pycommon-keycloak-realm.json && \
+	echo "wrote /tmp/pycommon-keycloak-realm.json ($$(wc -l < /tmp/pycommon-keycloak-realm.json) lines)"
 
 audit: ## Audit locked dependencies for known vulnerabilities
 	$(UV) export --frozen --extra all --no-dev --no-emit-project \

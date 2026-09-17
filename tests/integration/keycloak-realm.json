@@ -1,0 +1,75 @@
+{
+  "realm": "pycommon-test",
+  "enabled": true,
+  "sslRequired": "none",
+
+  "roles": {
+    "realm": [
+      { "name": "admin" }
+    ],
+    "client": {
+      "pycommon-api": [
+        { "name": "orders:write" }
+      ]
+    }
+  },
+
+  "clients": [
+    {
+      "clientId": "pycommon-api",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "pycommon-api-secret",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true,
+      "protocolMappers": [
+        {
+          "name": "audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "pycommon-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "pycommon-api-noaud",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "pycommon-api-noaud-secret",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true
+    }
+  ],
+
+  "users": [
+    {
+      "username": "alice",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "alice@example.test",
+      "firstName": "Alice",
+      "lastName": "Tester",
+      "credentials": [
+        { "type": "password", "value": "alice-password", "temporary": false }
+      ],
+      "realmRoles": ["admin"],
+      "clientRoles": { "pycommon-api": ["orders:write"] }
+    },
+    {
+      "username": "service-account-pycommon-api",
+      "enabled": true,
+      "serviceAccountClientId": "pycommon-api",
+      "clientRoles": { "pycommon-api": ["orders:write"] }
+    }
+  ]
+}

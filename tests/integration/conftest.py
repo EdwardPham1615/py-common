@@ -20,11 +20,14 @@ coherent, not that it works against the database the service actually runs.
 
 from __future__ import annotations
 
+import json
 import os
+import pathlib
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
+import httpx
 import pytest
 import redis.asyncio as redis_asyncio
 from redis.asyncio import Redis
@@ -125,3 +128,94 @@ def storage_settings() -> Any:
         # "works against AWS, 404s against MinIO" failure.
         use_path_style=True,
     )
+
+
+# --- Keycloak --------------------------------------------------------------
+
+REALM_FILE = pathlib.Path(__file__).with_name("keycloak-realm.json")
+
+
+@pytest.fixture(scope="session")
+def keycloak_realm() -> dict[str, Any]:
+    """The realm definition the running container was started from.
+
+    Read rather than duplicated as constants: client ids, secrets and the realm
+    name would otherwise live in two places, and the day they drift the symptom
+    is an ``invalid_client`` that looks like a broken server.
+    """
+    return json.loads(REALM_FILE.read_text())  # type: ignore[no-any-return]
+
+
+@pytest.fixture
+def keycloak_url() -> str:
+    url = os.getenv("KEYCLOAK_TEST_URL")
+    if not url:
+        pytest.skip("KEYCLOAK_TEST_URL is not set; skipping real-Keycloak integration tests")
+    return url.rstrip("/")
+
+
+def _client_secret(realm: dict[str, Any], client_id: str) -> str:
+    for client in realm["clients"]:
+        if client["clientId"] == client_id:
+            return str(client["secret"])
+    raise LookupError(f"{client_id} is not in {REALM_FILE.name}")
+
+
+@pytest.fixture
+def keycloak_settings(keycloak_url: str, keycloak_realm: dict[str, Any]) -> Any:
+    """Settings for the client that *does* carry a dedicated audience mapper."""
+    from pycommon.config import KeycloakSettings
+
+    return KeycloakSettings(
+        server_url=keycloak_url,
+        realm=keycloak_realm["realm"],
+        client_id="pycommon-api",
+        client_secret=_client_secret(keycloak_realm, "pycommon-api"),
+    )
+
+
+@pytest.fixture
+def keycloak_settings_noaud(keycloak_url: str, keycloak_realm: dict[str, Any]) -> Any:
+    """Settings for the control client, which has no audience mapper."""
+    from pycommon.config import KeycloakSettings
+
+    return KeycloakSettings(
+        server_url=keycloak_url,
+        realm=keycloak_realm["realm"],
+        client_id="pycommon-api-noaud",
+        client_secret=_client_secret(keycloak_realm, "pycommon-api-noaud"),
+    )
+
+
+@pytest.fixture
+def keycloak_token(
+    keycloak_url: str, keycloak_realm: dict[str, Any]
+) -> Callable[..., dict[str, Any]]:
+    """Ask the real server for a token, and hand back the whole response.
+
+    Deliberately plain ``httpx`` rather than
+    :class:`~pycommon.security.ClientCredentialsTokenProvider`: that provider is
+    one of the things under test here, so using it to set tests up would let a
+    bug in it hide behind itself.
+    """
+    realm = keycloak_realm["realm"]
+
+    def fetch(client_id: str, *, user: str | None = None) -> dict[str, Any]:
+        form = {
+            "client_id": client_id,
+            "client_secret": _client_secret(keycloak_realm, client_id),
+        }
+        if user is None:
+            form["grant_type"] = "client_credentials"
+        else:
+            form |= {"grant_type": "password", "username": user, "password": f"{user}-password"}
+
+        response = httpx.post(
+            f"{keycloak_url}/realms/{realm}/protocol/openid-connect/token",
+            data=form,
+            timeout=10.0,
+        )
+        response.raise_for_status()
+        return response.json()  # type: ignore[no-any-return]
+
+    return fetch

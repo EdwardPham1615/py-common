@@ -27,7 +27,7 @@ make format           # ruff format (writes)
 make typecheck        # mypy --strict on src/pycommon
 make test             # pytest
 make test-cov         # pytest with coverage (fails under 85%, see pyproject.toml)
-make infra-up         # docker compose: Redis, Postgres, Jaeger, MinIO (waits until healthy)
+make infra-up         # docker compose: Redis, Postgres, Jaeger, MinIO, Keycloak (waits until healthy)
 make test-integration-local  # infra-up, then the integration suite with the right env
 make infra-down       # stop them and delete the data
 make test-integration # tests/integration when the env vars are already set — see below
@@ -37,8 +37,8 @@ make pre-commit       # install + run pre-commit hooks
 
 `make check` runs the same lint/typecheck/test commands as CI, but **not the
 same test scope**: CI's `lint-test` job sets `REDIS_TEST_URL`,
-`POSTGRES_TEST_DSN`, `OTLP_TEST_ENDPOINT` and `S3_TEST_ENDPOINT` at the job
-level against service containers, so its single `pytest` run includes the
+`POSTGRES_TEST_DSN`, `OTLP_TEST_ENDPOINT`, `S3_TEST_ENDPOINT` and
+`KEYCLOAK_TEST_URL` at the job level, so its single `pytest` run includes the
 integration suite that skips locally. A green `make check` can still meet a
 red CI, and local coverage reads lower than CI's for the same reason.
 
@@ -63,7 +63,7 @@ integration fixtures on that pattern.
 is unset — don't expect `make test-integration` to do anything without them:
 
 ```bash
-make infra-up                 # Redis, Postgres, Jaeger, MinIO -- waits until healthy
+make infra-up                 # Redis, Postgres, Jaeger, MinIO, Keycloak -- waits until healthy
 make test-integration-local   # runs tests/integration against them
 make infra-down               # stops them, deletes the data
 ```
@@ -73,14 +73,14 @@ builds the env vars from the same values. To run one group alone, set only its
 variables and call `make test-integration`.
 
 Each group reads its own variables (`REDIS_TEST_URL`, `POSTGRES_TEST_DSN`,
-`OTLP_TEST_ENDPOINT`/`JAEGER_QUERY_URL`, `S3_TEST_ENDPOINT`) and skips when they
-are unset. Point them only at throwaway instances: the Redis fixture calls
+`OTLP_TEST_ENDPOINT`/`JAEGER_QUERY_URL`, `S3_TEST_ENDPOINT`, `KEYCLOAK_TEST_URL`)
+and skips when they are unset. Point them only at throwaway instances: the Redis fixture calls
 `FLUSHDB` and the Postgres one drops and recreates its tables. CI does not use
 the compose file — GitHub Actions starts its own service containers — so image
 tags there and in `docker-compose.yaml` have to be kept in step.
 
-If you touch a Lua script, a TTL, the lock, the query logger, or anything about
-pooling, run this suite — the fake-backed unit suite proves the Python is
+If you touch a Lua script, a TTL, the lock, the query logger, anything about
+pooling, or anything in `security`, run this suite — the fake-backed unit suite proves the Python is
 coherent, not that it works against the real database/broker.
 
 The unit test suite (`make test`) runs against `fakeredis` and `aiosqlite`
@@ -88,7 +88,10 @@ instead, so it needs no running services. Know their gaps before trusting a
 green run to mean more than it does: `fakeredis` doesn't faithfully execute
 Lua, has no server-side `TIME`, and doesn't really expire keys; SQLite has no
 statement timeout, no timezone-aware timestamp type, no
-`pg_terminate_backend`, and coerces types asyncpg rejects outright.
+`pg_terminate_backend`, and coerces types asyncpg rejects outright. The offline
+security tests are a closed loop of the same kind: the JWKS client is a mock,
+the discovery document is one we wrote, and the tokens are signed by our own
+keypair with the issuer and audience the validator already expects.
 
 ## Architecture
 
@@ -235,6 +238,17 @@ code, so treat these as closed unless something new contradicts them:
   `Custom(fn, ...)` reading `claims.raw`. Role and scope stay distinct because
   they answer different questions — who the caller is, versus what the client
   application may do on their behalf.
+
+- **`verify_aud` proves less than its name suggests, and that is Keycloak's
+  design, not our bug.** Measured against a real 26.7 server in
+  `tests/integration/test_keycloak_integration.py`: Keycloak fills `aud` from
+  the clients the *subject holds roles on*, not from the client that requested
+  the token — that one is `azp`, which pycommon does not check. So a token
+  obtained by any other client in the realm is accepted for any user holding a
+  role on ours. What `verify_aud=True` does reject is a subject with no role on
+  our client, who gets `aud: "account"` and a bare "Invalid or expired token".
+  `.env.example` asserted the opposite until the test was written. Don't turn
+  the default off to make something pass, and don't restate the old claim.
 
 - **Bulkhead / concurrency limiting is not wanted here.** It was considered
   and dropped, not deferred: don't propose it as a gap, don't add a
