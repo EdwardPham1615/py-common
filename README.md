@@ -4,6 +4,13 @@ Reusable platform library for FastAPI (and related) Python services: config, log
 
 ## Install
 
+**Requires Python 3.14+.** The floor tracks the current stable release rather
+than the oldest still receiving security fixes: a consuming service is one this
+team also runs, and 3.13 left its bugfix window on 2026-10-01.
+
+Note the name: there is an unrelated `pycommon` on PyPI. Install from the Git
+URL below, never `pip install pycommon`.
+
 ### From a Git URL (recommended for consumers)
 
 ```bash

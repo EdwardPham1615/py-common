@@ -131,7 +131,7 @@ class Cache:
         ttl = self.ttl_seconds if ttl_seconds == -1.0 else ttl_seconds
         try:
             raw = self.serializer.dumps(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             # Never fail the caller because a value would not serialize — the
             # cache is an optimisation, the value it was given is still good.
             logger.exception("cache_serialize_failed", namespace=self.namespace, key=key)

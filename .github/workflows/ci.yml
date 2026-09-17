@@ -78,7 +78,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
-          python-version: "3.13"
+          python-version: "3.14"
 
       - name: Sync
         run: uv sync --extra all --extra dev
@@ -161,7 +161,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
-          python-version: "3.13"
+          python-version: "3.14"
 
       # Audits the resolved lockfile rather than the loosest versions the
       # constraints allow, so this reports what consumers would actually get.

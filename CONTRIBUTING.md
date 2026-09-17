@@ -6,7 +6,7 @@ That shapes most of what follows.
 
 ## Getting set up
 
-Requires Python 3.13+ and [uv](https://docs.astral.sh/uv/).
+Requires Python 3.14+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 make install && make pre-commit
