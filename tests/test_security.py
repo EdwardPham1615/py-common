@@ -417,6 +417,41 @@ async def test_token_is_fetched_with_client_credentials() -> None:
     }
 
 
+async def test_no_scope_is_sent_when_none_is_configured() -> None:
+    """The default request stays byte-identical to what it always was.
+
+    A service that never configures a scope must see no change on the wire --
+    and an empty ``scope=`` is not the same as no ``scope`` at all.
+    """
+    provider = ClientCredentialsTokenProvider(settings=KC_CONFIDENTIAL)
+    calls: list[httpx.Request] = []
+
+    with _patched_async_client(_token_handler(calls)):
+        await provider.get_token()
+
+    # keep_blank_values, or this assertion cannot see the difference it exists
+    # for: parse_qsl drops `scope=` silently, so sending an empty scope instead
+    # of omitting the key would read as identical. (It did, until a mutation
+    # check caught it.)
+    sent = dict(parse_qsl(calls[0].content.decode(), keep_blank_values=True))
+    assert "scope" not in sent
+
+
+async def test_the_configured_scope_is_requested() -> None:
+    """Without this the grant can only ever carry the client's default scopes,
+    so no ``HasScope`` rule naming a business scope could pass for an S2S
+    caller. Verified against a real Keycloak in
+    ``tests/integration/test_keycloak_integration.py``."""
+    settings = KC_CONFIDENTIAL.model_copy(update={"token_scope": "orders:write orders:read"})
+    provider = ClientCredentialsTokenProvider(settings=settings)
+    calls: list[httpx.Request] = []
+
+    with _patched_async_client(_token_handler(calls)):
+        await provider.get_token()
+
+    assert dict(parse_qsl(calls[0].content.decode()))["scope"] == "orders:write orders:read"
+
+
 async def test_token_is_cached_until_it_nears_expiry() -> None:
     provider = ClientCredentialsTokenProvider(settings=KC_CONFIDENTIAL)
     calls: list[httpx.Request] = []

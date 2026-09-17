@@ -10,6 +10,13 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `KEYCLOAK__TOKEN_SCOPE` — scopes to request with the `client_credentials`
+  grant, sent by `ClientCredentialsTokenProvider`. Unset, no `scope` parameter
+  is sent and the request is unchanged. Without it a service-account token
+  carries only its client's default scopes, so no `HasScope` rule naming a
+  business scope could pass for a service-to-service caller. See README's
+  "Scoping a service token" for the realm configuration it needs.
+
 - `protected_router(auth, ...)` and `internal_router(settings, ...)` build an
   `APIRouter` whose routes are authenticated as a family, nested routers
   included, and whose requirement reaches the OpenAPI document so Swagger's

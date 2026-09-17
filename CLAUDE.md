@@ -239,6 +239,15 @@ code, so treat these as closed unless something new contradicts them:
   they answer different questions — who the caller is, versus what the client
   application may do on their behalf.
 
+  That argument was originally overstated, and the integration suite is what
+  showed it: `HasScope` had the same defect for any business scope, because
+  `ClientCredentialsTokenProvider` sent no `scope` and a token therefore carried
+  only its client's defaults. `KEYCLOAK__TOKEN_SCOPE` closed that. The
+  distinction that survives is narrower than it first read — `HasScope` needs a
+  standard client scope feeding the standard `scope` claim at a fixed path,
+  where `HasPermission` needed a custom mapper, a non-standard claim, and a
+  setting naming its path.
+
 - **`verify_aud` proves less than its name suggests, and that is Keycloak's
   design, not our bug.** Measured against a real 26.7 server in
   `tests/integration/test_keycloak_integration.py`: Keycloak fills `aud` from
