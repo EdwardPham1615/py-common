@@ -28,12 +28,25 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+import httpx
 import jwt
 import pytest
-from fastapi import HTTPException
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.testclient import TestClient
 from jwt import PyJWKClient
 
-from pycommon.security import ClientCredentialsTokenProvider, KeycloakTokenValidator
+from pycommon.config import BaseAppSettings
+from pycommon.http.middleware import apply_standard_middleware
+from pycommon.http.problem import register_exception_handlers
+from pycommon.security import (
+    Auth,
+    ClientCredentialsTokenProvider,
+    HasRole,
+    HasScope,
+    KeycloakTokenValidator,
+    TokenClaims,
+    protected_router,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -182,3 +195,183 @@ async def test_client_credentials_round_trips_through_our_own_validator(
     # No realm roles on a service account, and no scope was requested -- so
     # roles are the only thing an authorization rule has to work with here.
     assert claims.realm_roles == []
+
+
+# --- the layer that sits on top of the validator ---------------------------
+#
+# Everything above exercises KeycloakTokenValidator. The routers and
+# requirements built on it were only ever tested against a stub validator, so
+# nothing proved that a real bearer header travels all the way through: header
+# -> signature and audience check -> claims -> predicate -> status code. These
+# do, through the real middleware stack, so the answer to "does our auth work
+# against Keycloak" stops being something a person has to assemble by hand.
+
+
+@pytest.fixture
+def auth_app(keycloak_settings: Any) -> FastAPI:
+    """A service-shaped app: authentication on the router, authorization on routes."""
+    auth = Auth(KeycloakTokenValidator(settings=keycloak_settings))
+    settings = BaseAppSettings(_env_file=None)
+
+    app = FastAPI()
+    api = protected_router(auth, prefix="/api/v1")
+
+    # Carries nothing of its own: no claims parameter, no route dependency.
+    # Every other route here reaches current_user through its own chain, so this
+    # is the only one whose protection comes purely from the router. Without it,
+    # removing the router's dependency entirely would fail no test -- which is
+    # how this route came to exist.
+    @api.get("/bare")
+    async def bare() -> dict[str, str]:
+        return {"ok": "yes"}
+
+    @api.get("/me")
+    async def me(user: TokenClaims = Depends(auth.current_user)) -> dict[str, Any]:  # noqa: B008
+        return {"sub": user.sub, "roles": sorted(user.roles), "scopes": sorted(user.scopes)}
+
+    @api.get("/admin", dependencies=[Depends(auth.require_roles("admin"))])
+    async def admin() -> dict[str, str]:
+        return {"ok": "yes"}
+
+    # Guarded by a CLIENT role alone. Without it, every passing route here could
+    # be satisfied by alice's realm role, and nothing would prove that roles
+    # under resource_access reach a rule at all.
+    @api.get("/orders-write", dependencies=[Depends(auth.require_roles("orders:write"))])
+    async def orders_write() -> dict[str, str]:
+        return {"ok": "yes"}
+
+    @api.get("/nobody", dependencies=[Depends(auth.require_roles("nobody"))])
+    async def nobody() -> dict[str, str]:
+        return {"ok": "yes"}
+
+    @api.post(
+        "/orders",
+        dependencies=[Depends(auth.requires(HasRole("admin") | HasScope("orders:write")))],
+    )
+    async def orders() -> dict[str, str]:
+        return {"ok": "yes"}
+
+    @api.post("/scope-only", dependencies=[Depends(auth.requires(HasScope("orders:write")))])
+    async def scope_only() -> dict[str, str]:
+        return {"ok": "yes"}
+
+    app.include_router(api)
+    register_exception_handlers(app)
+    apply_standard_middleware(app, settings)
+    return app
+
+
+@pytest.fixture
+def alice_headers(keycloak_token: TokenFetcher) -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {keycloak_token('pycommon-api', user='alice')['access_token']}"
+    }
+
+
+def test_a_protected_router_admits_a_real_token_and_nothing_else(
+    auth_app: FastAPI, alice_headers: dict[str, str]
+) -> None:
+    """The whole path, end to end, for the first time.
+
+    The offline equivalent stubs out decoding entirely, so it proves the wiring
+    and not that a token Keycloak actually issued gets through it.
+    """
+    client = TestClient(auth_app)
+
+    # The route with nothing of its own: only the router stands between an
+    # anonymous caller and the handler.
+    assert client.get("/api/v1/bare").status_code == 401
+    assert client.get("/api/v1/bare", headers=alice_headers).status_code == 200
+
+    assert client.get("/api/v1/me").status_code == 401
+    assert client.get("/api/v1/me", headers={"Authorization": "Bearer nonsense"}).status_code == 401
+
+    body = client.get("/api/v1/me", headers=alice_headers).json()
+    assert body["roles"] == ["admin", "orders:write"]
+    assert body["sub"]
+
+
+def test_role_rules_decide_on_the_roles_keycloak_really_sent(
+    auth_app: FastAPI, alice_headers: dict[str, str]
+) -> None:
+    """A realm role and a client role, reaching the predicates as one set.
+
+    alice holds ``admin`` in ``realm_access`` and ``orders:write`` under
+    ``resource_access``. Both have to arrive for ``HasRole`` to mean what the
+    README says it means.
+    """
+    client = TestClient(auth_app)
+
+    # The realm role, then the client role on its own -- the second is what
+    # proves resource_access is reaching the predicate and not merely the
+    # claims object.
+    assert client.get("/api/v1/admin", headers=alice_headers).status_code == 200
+    assert client.get("/api/v1/orders-write", headers=alice_headers).status_code == 200
+    assert client.post("/api/v1/orders", headers=alice_headers).status_code == 200
+
+    denied = client.get("/api/v1/nobody", headers=alice_headers)
+    assert denied.status_code == 403
+    assert denied.json()["detail"] == "Insufficient permissions; requires: role:nobody"
+
+
+def test_rejections_are_problem_details_all_the_way_through(
+    auth_app: FastAPI, alice_headers: dict[str, str]
+) -> None:
+    """401 and 403 keep the shape every other error in a service has.
+
+    This is the property that made auth a dependency rather than middleware, now
+    checked against a real token instead of a stubbed decode.
+    """
+    client = TestClient(auth_app)
+
+    unauthenticated = client.get("/api/v1/me")
+    assert unauthenticated.headers["content-type"].startswith("application/problem+json")
+    assert unauthenticated.headers["WWW-Authenticate"] == "Bearer"
+    assert unauthenticated.headers["X-Request-ID"]
+
+    forbidden = client.get("/api/v1/nobody", headers=alice_headers)
+    assert forbidden.headers["content-type"].startswith("application/problem+json")
+    assert forbidden.headers["X-Request-ID"]
+
+
+def test_has_scope_cannot_authorise_anything_a_service_would_want_today(
+    auth_app: FastAPI, alice_headers: dict[str, str], keycloak_url: str
+) -> None:
+    """Recording a real limitation, not asserting a bug.
+
+    A Keycloak token carries only the scopes of the client scopes assigned to
+    the requesting client -- here ``profile email``, nothing else. So
+    ``HasScope("orders:write")`` denies a caller who is, by every other measure,
+    entitled: the same request passes when the rule is ``HasRole(...)``, and the
+    combined ``HasRole | HasScope`` route above passes through the role branch.
+
+    Nor can the caller simply ask: Keycloak answers ``invalid_scope`` for a
+    scope no client scope defines. Making ``HasScope`` usable takes realm
+    configuration (create the client scope, assign it to the client) plus a
+    grant that requests it -- and ``ClientCredentialsTokenProvider`` sends no
+    ``scope`` at all, so service-to-service callers have no route to it.
+
+    Worth stating because ``HasPermission`` was dropped for this exact property.
+    If this test ever goes green, the configuration it needs has been done and
+    the README should say how.
+    """
+    client = TestClient(auth_app)
+
+    denied = client.post("/api/v1/scope-only", headers=alice_headers)
+    assert denied.status_code == 403
+    assert denied.json()["detail"] == "Insufficient permissions; requires: scope:orders:write"
+
+    refused = httpx.post(
+        f"{keycloak_url}/realms/pycommon-test/protocol/openid-connect/token",
+        data={
+            "grant_type": "password",
+            "client_id": "pycommon-api",
+            "client_secret": "pycommon-api-secret",
+            "username": "alice",
+            "password": "alice-password",
+            "scope": "orders:write",
+        },
+        timeout=10.0,
+    )
+    assert refused.status_code == 400
+    assert refused.json()["error"] == "invalid_scope"
