@@ -15,10 +15,10 @@ URL below, never `pip install py-common`.
 
 ```bash
 # uv
-uv add "py-common[all] @ git+https://github.com/EdwardPham1615/pycommon.git@v0.1.0"
+uv add "py-common[all] @ git+https://github.com/EdwardPham1615/py-common.git@v0.1.0"
 
 # pip
-pip install "py-common[all] @ git+https://github.com/EdwardPham1615/pycommon.git@v0.1.0"
+pip install "py-common[all] @ git+https://github.com/EdwardPham1615/py-common.git@v0.1.0"
 ```
 
 Pin a tag or commit SHA for reproducible builds.
@@ -52,7 +52,7 @@ Core always installs: `pydantic`, `pydantic-settings`, `structlog`, `ecs-logging
 | `all` | Everything above |
 | `dev` | ruff, mypy, pytest, pre-commit, aiosqlite, fakeredis |
 
-Example: `uv add "py-common[http,persistence,runtime] @ git+https://github.com/EdwardPham1615/pycommon.git@v0.1.0"`
+Example: `uv add "py-common[http,persistence,runtime] @ git+https://github.com/EdwardPham1615/py-common.git@v0.1.0"`
 
 ## Modules
 

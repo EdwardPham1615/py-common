@@ -27,6 +27,15 @@ dependencies = [
     "tenacity>=9.0.0",
 ]
 
+# Metadata is the only thing tying a built wheel back to its source, and it
+# matters more than usual here: `pycommon` on PyPI belongs to someone else, so a
+# wheel that names its own repository is how a reader confirms which project
+# they are holding.
+[project.urls]
+Repository = "https://github.com/EdwardPham1615/py-common"
+Changelog = "https://github.com/EdwardPham1615/py-common/blob/main/CHANGELOG.md"
+Issues = "https://github.com/EdwardPham1615/py-common/issues"
+
 [project.optional-dependencies]
 http = [
     "fastapi>=0.141.1",

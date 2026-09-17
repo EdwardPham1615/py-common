@@ -24,12 +24,16 @@ versioning follows [Semantic Versioning](https://semver.org/).
   ```toml
   # before
   dependencies = ["pycommon[all] @ git+https://github.com/EdwardPham1615/pycommon.git@v0.1.0"]
+
   # after
-  dependencies = ["py-common[all] @ git+https://github.com/EdwardPham1615/pycommon.git@v0.1.0"]
+  dependencies = ["py-common[all] @ git+https://github.com/EdwardPham1615/py-common.git@v0.1.0"]
   ```
 
-  The repository URL is unchanged; only the package name moved. Note the two
-  spellings: `py-common` wherever a distribution is named (install commands,
+  The repository moved with it, from `pycommon` to `py-common`. GitHub redirects
+  the old path, so an existing clone or link keeps working — but the URL above is
+  the one to write down, and the wheel now carries it in `Project-URL` metadata
+  so a built artifact can be traced back to this repository rather than to the
+  unrelated `pycommon` on PyPI. Note the two spellings: `py-common` wherever a distribution is named (install commands,
   extras, error messages telling you what to install), `py_common` wherever
   Python is — a hyphen is not a valid identifier.
 
