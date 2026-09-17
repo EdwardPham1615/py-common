@@ -1,6 +1,6 @@
 [project]
 name = "py-common"
-version = "0.2.0"
+version = "0.2.1"
 description = "Reusable platform library: config, logging, telemetry, security, storage, HTTP, runtime, persistence"
 readme = "README.md"
 requires-python = ">=3.14"

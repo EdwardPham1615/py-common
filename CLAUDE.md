@@ -9,7 +9,7 @@ storage, HTTP helpers, runtime, persistence, cache, utils) for internal FastAPI
 services, installed by pinning a git tag. It is *not* an application — there is
 no domain logic here.
 
-**Current state: `v0.2.0` shipped 2026-09-18 and no service consumes it yet.**
+**Current state: `v0.2.1` shipped 2026-09-18 and no service consumes it yet.**
 **Requires Python 3.14+** — the floor tracks the current stable release, not the
 oldest one still getting security fixes. Nothing here needs 3.14; it is a support
 commitment made while raising it is still free. 3.15 is not usable yet
@@ -112,6 +112,17 @@ to have `aioboto3` or `grpcio` importable. This is the load-bearing
 constraint behind the module boundaries; when adding a feature, put it in the
 subpackage matching the extra it needs, don't add a new top-level dependency
 without gating it behind an extra.
+
+**The package `__init__` is where this constraint actually gets broken.** Python
+executes it whenever anything imports *any* submodule, so an `__init__` that
+re-exports eagerly makes the package's entire dependency set every importer's
+dependency set — which is how 0.2.0 shipped four extras that could not import
+the modules they promise. `runtime/__init__.py` and `http/__init__.py` therefore
+resolve their re-exports on first access (PEP 562), and `telemetry/__init__.py`
+imports the OTel SDK inside the function bodies that use it. Adding an eager
+`from py_common.x.y import z` to one of those files reintroduces the bug, and
+`make extras-check` (its own CI job) is what catches it — `make test` cannot,
+because it runs under `--extra all`.
 
 ### Module responsibilities
 

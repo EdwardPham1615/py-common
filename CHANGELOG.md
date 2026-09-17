@@ -8,6 +8,45 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-18
+
+### Fixed
+
+- Four extras could not import the modules they promise. Installing exactly
+  what the README documents was enough to hit it:
+
+  | install | import | 0.2.0 |
+  |---|---|---|
+  | `py-common[http]` | `py_common.http.middleware` | `No module named 'redis'` |
+  | `py-common[runtime]` | `py_common.runtime` | `No module named 'opentelemetry.exporter'` |
+  | `py-common[persistence]` | `py_common.persistence` | `No module named 'fastapi'` |
+  | `py-common[persistence]` | `py_common.persistence.migrations` | `No module named 'httpx'` |
+
+  The `http` one took out `apply_standard_middleware`, which is the entry point
+  that module exists for and the first thing README's "Quick usage" calls.
+
+  The cause was the same in every case: a package `__init__` importing all of
+  its submodules eagerly. Python executes that file whenever anything imports
+  *any* submodule, so the package's whole dependency set became every
+  importer's dependency set — `py_common.persistence.pagination` reaching for a
+  cursor helper was paying for `httpx`, and the HTTP metrics middleware was
+  paying for the OTel SDK.
+
+  `py_common.runtime` and `py_common.http` now resolve their re-exports on first
+  access (PEP 562), `py_common.http.middleware` defers only the `idempotency`
+  names, and `setup_telemetry` imports the OTel SDK in its own body the way it
+  already did for the instrumentors. Every public name is reachable exactly as
+  before; `from py_common.runtime import create_base_app` is unchanged.
+
+  No API changed, so there is nothing to migrate — but a service that worked
+  around this by installing extras it does not use can stop.
+
+- `scripts/check-extras-isolation.sh` installs each extra alone and imports what
+  it promises, wired into CI as its own job. The unit suite runs under
+  `--extra all`, so it structurally cannot catch this class of bug: every
+  optional dependency is present and a module reaching outside its extra looks
+  fine.
+
 ## [0.2.0] - 2026-09-18
 
 ### Added

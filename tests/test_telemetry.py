@@ -123,8 +123,16 @@ def stub_sdk(monkeypatch: pytest.MonkeyPatch) -> Any:
     """Build a real TracerProvider, but never export and never set it globally."""
     _FakeExporter.instances.clear()
     installed: list[Any] = []
-    monkeypatch.setattr(tel, "OTLPSpanExporter", _FakeExporter)
-    monkeypatch.setattr(tel, "BatchSpanProcessor", _FakeProcessor)
+    # Patched where the symbols live, not on py_common.telemetry. setup_telemetry
+    # imports the OTel SDK inside its own body so that importing this package
+    # never drags the SDK in -- see the comment there -- which means there is no
+    # module-level name to replace, and patching the source module is what the
+    # call-time import actually picks up.
+    monkeypatch.setattr(
+        "opentelemetry.exporter.otlp.proto.grpc.trace_exporter.OTLPSpanExporter",
+        _FakeExporter,
+    )
+    monkeypatch.setattr("opentelemetry.sdk.trace.export.BatchSpanProcessor", _FakeProcessor)
     monkeypatch.setattr(tel.trace, "set_tracer_provider", installed.append)
     monkeypatch.setattr(tel, "setup_metrics", lambda **kw: None)
     monkeypatch.setattr(tel, "_instrument_libraries", lambda app: None)
@@ -171,8 +179,11 @@ def test_metrics_are_set_up_with_the_same_endpoint(monkeypatch: pytest.MonkeyPat
     captured: dict[str, Any] = {}
     monkeypatch.setattr(tel, "setup_metrics", lambda **kw: captured.update(kw))
     monkeypatch.setattr(tel, "_instrument_libraries", lambda app: None)
-    monkeypatch.setattr(tel, "OTLPSpanExporter", _FakeExporter)
-    monkeypatch.setattr(tel, "BatchSpanProcessor", _FakeProcessor)
+    monkeypatch.setattr(
+        "opentelemetry.exporter.otlp.proto.grpc.trace_exporter.OTLPSpanExporter",
+        _FakeExporter,
+    )
+    monkeypatch.setattr("opentelemetry.sdk.trace.export.BatchSpanProcessor", _FakeProcessor)
     monkeypatch.setattr(tel.trace, "set_tracer_provider", lambda p: None)
     tel._provider = None
 

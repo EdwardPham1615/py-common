@@ -153,6 +153,24 @@ jobs:
       - name: Test
         run: uv run pytest --cov=py_common --cov-report=term-missing
 
+  # A separate job because it needs a clean environment per extra, which the
+  # lint-test job -- which installs `--extra all` up front -- structurally
+  # cannot give it. That is exactly why 0.2.0 shipped four extras that could not
+  # import the modules they promise: every test ran with every dependency
+  # present.
+  extras-isolation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.14"
+
+      - name: Each extra stands on its own
+        run: ./scripts/check-extras-isolation.sh
+
   audit:
     runs-on: ubuntu-latest
     steps:
