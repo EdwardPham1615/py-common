@@ -859,8 +859,8 @@ for cutting a release.
 
 ### Integration tests
 
-`tests/integration` runs against real Redis, Postgres, Jaeger, MinIO and
-Keycloak. Each group skips unless its environment variable is set, so a plain
+`tests/integration` runs against real Redis, Postgres, Jaeger, LocalStack (S3)
+and Keycloak. Each group skips unless its environment variable is set, so a plain
 `make test` stays offline.
 
 ```bash

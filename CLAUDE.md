@@ -41,7 +41,7 @@ make format           # ruff format (writes) -- also Python blocks inside Markdo
 make typecheck        # mypy --strict on src/py_common
 make test             # pytest
 make test-cov         # pytest with coverage (fails under 85%, see pyproject.toml)
-make infra-up         # docker compose: Redis, Postgres, Jaeger, MinIO, Keycloak (waits until healthy)
+make infra-up         # docker compose: Redis, Postgres, Jaeger, LocalStack, Keycloak (waits until healthy)
 make test-integration-local  # infra-up, then the integration suite with the right env
 make infra-down       # stop them and delete the data
 make test-integration # tests/integration when the env vars are already set — see below
@@ -85,7 +85,7 @@ integration fixtures on that pattern.
 is unset — don't expect `make test-integration` to do anything without them:
 
 ```bash
-make infra-up                 # Redis, Postgres, Jaeger, MinIO, Keycloak -- waits until healthy
+make infra-up                 # Redis, Postgres, Jaeger, LocalStack, Keycloak -- waits until healthy
 make test-integration-local   # runs tests/integration against them
 make infra-down               # stops them, deletes the data
 ```
