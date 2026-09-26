@@ -8,6 +8,30 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `py-common[migrations]` could not import `py_common.persistence.migrations`. It
+  failed with *"The SQLAlchemy asyncio module requires that the Python 'greenlet'
+  library is installed"* — because importing that submodule runs
+  `persistence/__init__.py`, which imported `engine` and therefore
+  `sqlalchemy.ext.asyncio`, whose `greenlet` dependency only the `persistence`
+  extra's `sqlalchemy[asyncio]` brings. The Alembic helpers are synchronous and
+  need none of it.
+
+  `persistence/__init__.py` now resolves its re-exports on first access, like
+  `runtime` and `http` since 0.2.1. No public name moved.
+
+  It went unnoticed because whether it fails depends on what a fresh resolve
+  happens to pull in; CI stayed green while a local run went red.
+  `scripts/check-extras-isolation.sh` resolves fresh, which is how it surfaced.
+
+- `scripts/check-extras-isolation.sh` now also imports `py_common.testing.routes`
+  (under `http`) and `py_common.testing.tokens` (under `security`). They are
+  public API a consumer imports in its own test suite and each carries its own
+  extra, so leaving them out left a hole exactly where a helper is most likely to
+  reach across packages.
+
+
 ## [0.2.1] - 2026-09-18
 
 ### Fixed
