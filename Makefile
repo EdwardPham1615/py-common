@@ -53,12 +53,12 @@ INFRA_ENV := \
 	POSTGRES_TEST_DSN=postgresql+asyncpg://pycommon:pycommon@localhost:5432/pycommon_test \
 	OTLP_TEST_ENDPOINT=http://localhost:4317 \
 	JAEGER_QUERY_URL=http://localhost:16686 \
-	S3_TEST_ENDPOINT=http://localhost:9000 \
+	S3_TEST_ENDPOINT=http://localhost:4566 \
 	S3_TEST_ACCESS_KEY=pycommon \
 	S3_TEST_SECRET_KEY=pycommon123 \
 	KEYCLOAK_TEST_URL=http://localhost:8080
 
-infra-up: ## Start Redis/Postgres/Jaeger/MinIO/Keycloak for the integration suite, wait until healthy
+infra-up: ## Start Redis/Postgres/Jaeger/LocalStack/Keycloak for the integration suite, wait until healthy
 	docker compose up -d --wait
 
 infra-down: ## Stop them and delete their data

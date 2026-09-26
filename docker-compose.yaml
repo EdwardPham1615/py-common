@@ -61,20 +61,37 @@ services:
       timeout: 3s
       retries: 15
 
-  minio:
-    # quay.io, not Docker Hub: docker.io/minio/minio stopped answering anonymous
-    # pulls, which is what broke CI in September.
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
-    command: server /data
+  # LocalStack, not MinIO. MinIO stopped answering anonymous pulls on Docker Hub
+  # (which broke CI in September 2025 and is why this moved to quay.io), and by
+  # 2026-09-26 quay.io answered `no such manifest` for the pinned tag and 401 for
+  # the repository -- every anonymous route to that image is now closed. Checked
+  # and also unavailable: docker.io/minio/minio, minio/minio:latest,
+  # bitnami/minio, the ECR mirror.
+  #
+  # LocalStack needs no S3 identity configuration, accepts the same throwaway
+  # credentials, and passes the storage suite unchanged -- presigned GET/PUT and
+  # path-style addressing included, which are the parts that only work against
+  # something that really answers like S3.
+  #
+  # Side benefit: S3 moves off port 9000, where Keycloak's management port would
+  # otherwise collide.
+  localstack:
+    image: localstack/localstack:4.9
     environment:
-      MINIO_ROOT_USER: pycommon
-      MINIO_ROOT_PASSWORD: pycommon123
-    ports: ["9000:9000"]
+      SERVICES: s3
+    ports: ["4566:4566"]
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      # The image ships curl. It checks that s3 reports "available" rather than
+      # just that the port answers: the health endpoint responds before the
+      # service has finished coming up.
+      test:
+        - CMD-SHELL
+        - >-
+          curl -sf http://localhost:4566/_localstack/health
+          | grep -q '"s3": "available"'
       interval: 3s
-      timeout: 3s
-      retries: 10
+      timeout: 5s
+      retries: 20
 
   keycloak:
     # Pinned like the rest. `start-dev` keeps everything in an in-memory-ish dev
@@ -97,10 +114,11 @@ services:
     healthcheck:
       # Neither curl nor wget is in this image -- verified against 26.7.4, not
       # assumed -- so the check goes through bash's /dev/tcp. It asks for the
-      # realm's discovery document rather than /health/ready for two reasons:
-      # that endpoint lives on management port 9000, which MinIO already uses in
-      # CI, and "the realm imported and is being served" is the condition the
-      # tests actually need, where "the process is alive" is not.
+      # realm's discovery document rather than /health/ready because "the realm
+      # imported and is being served" is the condition the tests actually need,
+      # where "the process is alive" is not; /health/ready also needs
+      # KC_HEALTH_ENABLED and sits on management port 9000. (That port used to
+      # clash with MinIO; S3 is on 4566 now, so only the first reason is left.)
       test:
         - CMD-SHELL
         - >-

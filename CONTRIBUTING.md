@@ -105,7 +105,7 @@ and coerces types that asyncpg rejects outright. `tests/integration` covers what
 they cannot, against the real thing:
 
 ```bash
-make infra-up                 # Redis, Postgres, Jaeger and MinIO; waits until healthy
+make infra-up                 # Redis, Postgres, Jaeger, LocalStack, Keycloak; waits until healthy
 make test-integration-local   # runs tests/integration against them
 make infra-down               # stops them and deletes the data
 ```
