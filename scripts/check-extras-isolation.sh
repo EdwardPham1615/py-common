@@ -14,9 +14,13 @@
 set -euo pipefail
 
 # extra:module[,module...]  -- what installing that extra alone must give you.
+# The py_common.testing.* submodules are listed because they are public API a
+# consumer imports in its own test suite, and they carry their own extra: routes
+# needs http, tokens needs security. Leaving them out left a hole exactly where
+# a helper is most likely to reach across packages.
 CASES=(
-  "http:py_common.http,py_common.http.middleware"
-  "security:py_common.security"
+  "http:py_common.http,py_common.http.middleware,py_common.testing.routes"
+  "security:py_common.security,py_common.testing.tokens"
   "cache:py_common.cache"
   "storage:py_common.storage"
   "telemetry:py_common.telemetry"
