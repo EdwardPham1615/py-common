@@ -10,6 +10,21 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- The access log can name the caller. `RequestContextMiddleware` has always read
+  `request.state.user.sub` into the log's `user.id` field, but nothing in the
+  library wrote that field — it was documented and never populated, so a service
+  either added its own dependency to bind the claims or accepted an access log
+  that could not say who did anything.
+
+  `Auth.current_user` and `Auth.optional_user` now publish the decoded claims on
+  `request.state.user`. Additive, and it costs no extra token decode: the closures
+  are still built once, so FastAPI's per-callable dependency cache still resolves
+  them a single time per request.
+
+  `optional_user` writes the field only when a token was actually presented, so an
+  anonymous request leaves `user.id` absent rather than present and empty.
+
+
 - `setup_logging` now adopts uvicorn's own loggers, so the log format holds
   however the process was started. Under the `uvicorn` CLI, uvicorn applies its
   `LOGGING_CONFIG` via `dictConfig` **before importing the app**, giving the

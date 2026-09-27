@@ -32,7 +32,7 @@ import secrets
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 
 from py_common.logging import get_logger
@@ -99,19 +99,37 @@ class Auth:
         # two JWKS lookups on a cold cache.
         validator = self.validator
 
+        # Both closures publish the claims on request.state so the access log can
+        # name the caller. RequestContextMiddleware reads `request.state.user.sub`
+        # into the log's `user.id` field (`http/middleware/request_context.py:84`),
+        # but nothing wrote it -- the field was documented and never populated, so
+        # every service had to add its own dependency or accept an access log that
+        # could not say who did anything.
+        #
+        # Taking `Request` costs nothing: it is not another dependency FastAPI has
+        # to resolve, and the closures are still built once here, so the per-request
+        # cache still decodes a token exactly once.
         async def current_user(
+            request: Request,
             credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
         ) -> TokenClaims:
             if credentials is None or credentials.scheme.lower() != "bearer":
                 raise unauthorized("Not authenticated")
-            return await validator.decode_async(credentials.credentials)
+            claims = await validator.decode_async(credentials.credentials)
+            request.state.user = claims
+            return claims
 
         async def optional_user(
+            request: Request,
             credentials: HTTPAuthorizationCredentials | None = Depends(_optional_bearer),
         ) -> TokenClaims | None:
             if credentials is None or credentials.scheme.lower() != "bearer":
                 return None
-            return await validator.decode_async(credentials.credentials)
+            claims = await validator.decode_async(credentials.credentials)
+            # Only on success. Leaving state.user unset for an anonymous caller is
+            # what keeps `user.id` absent from the log rather than present and empty.
+            request.state.user = claims
+            return claims
 
         self._current_user = current_user
         self._optional_user = optional_user
