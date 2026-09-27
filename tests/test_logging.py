@@ -28,6 +28,12 @@ def restore_logging() -> Iterator[None]:
     handlers = root.handlers[:]
     level = root.level
     quieted = {name: logging.getLogger(name).level for name in ("uvicorn.access", "httpx")}
+    # setup_logging clears these handlers and flips propagate, so they need saving
+    # too -- otherwise one test's adoption of uvicorn's loggers leaks into the next.
+    adopted = {
+        name: (logging.getLogger(name).handlers[:], logging.getLogger(name).propagate)
+        for name in ("uvicorn", "uvicorn.error")
+    }
     try:
         yield
     finally:
@@ -37,6 +43,10 @@ def restore_logging() -> Iterator[None]:
         root.setLevel(level)
         for name, lvl in quieted.items():
             logging.getLogger(name).setLevel(lvl)
+        for name, (saved_handlers, propagate) in adopted.items():
+            logger = logging.getLogger(name)
+            logger.handlers[:] = saved_handlers
+            logger.propagate = propagate
 
 
 def _emit(capsys: pytest.CaptureFixture[str], name: str, **setup: Any) -> list[dict[str, Any]]:
@@ -238,3 +248,44 @@ def test_timestamp_is_taken_when_the_event_happens(
     assert before <= stamped <= after
     # Microsecond precision is the processor's; ecs_logging truncates to millis.
     assert len(record["@timestamp"].split(".")[1]) > 4
+
+
+# --- uvicorn's own loggers -----------------------------------------------------
+#
+# Started with the `uvicorn` CLI, uvicorn applies its LOGGING_CONFIG via dictConfig
+# before the app is imported: the `uvicorn` logger gets its own handler and
+# `propagate: False`. Replacing the root handler never reaches it, so uvicorn's
+# startup and shutdown lines stay plain text in an otherwise ECS stream and a
+# shipper parsing one JSON object per line drops them.
+
+
+def test_uvicorn_loggers_are_adopted(capsys: pytest.CaptureFixture[str]) -> None:
+    """Their records must reach the formatter this library installed."""
+    uvicorn_logger = logging.getLogger("uvicorn")
+    uvicorn_logger.handlers = [logging.NullHandler()]
+    uvicorn_logger.propagate = False
+
+    setup_logging(json_logs=True)
+
+    assert uvicorn_logger.handlers == []
+    assert uvicorn_logger.propagate is True
+
+    logging.getLogger("uvicorn.error").info("Application startup complete.")
+    lines = [json.loads(line) for line in capsys.readouterr().out.strip().splitlines() if line]
+    assert [entry["message"] for entry in lines] == ["Application startup complete."]
+
+
+def test_uvicorn_access_is_not_adopted(capsys: pytest.CaptureFixture[str]) -> None:
+    """The exception, and the reason it is one.
+
+    ``RequestContextMiddleware`` already emits the access log, so adopting
+    uvicorn's would put two access lines on every request. Silencing it by level is
+    what keeps the library's own the only one — this test is here to fail if
+    somebody "finishes the job" by adding ``uvicorn.access`` to the adoption loop.
+    """
+    setup_logging(json_logs=True)
+
+    assert logging.getLogger("uvicorn.access").level == logging.WARNING
+
+    logging.getLogger("uvicorn.access").info('GET /health HTTP/1.1" 200')
+    assert capsys.readouterr().out == ""

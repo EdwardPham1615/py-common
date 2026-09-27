@@ -8,6 +8,23 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `setup_logging` now adopts uvicorn's own loggers, so the log format holds
+  however the process was started. Under the `uvicorn` CLI, uvicorn applies its
+  `LOGGING_CONFIG` via `dictConfig` **before importing the app**, giving the
+  `uvicorn` logger its own handler and `propagate: False` — so replacing the root
+  handler never reached it, and uvicorn's startup and shutdown lines stayed plain
+  text in an otherwise ECS stream. A shipper parsing one JSON object per line
+  drops exactly the lines you want during an incident.
+
+  `run_uvicorn` already avoided this by passing `log_config=None`; nothing stopped
+  a consumer from using the CLI.
+
+  `uvicorn.access` is deliberately **not** adopted. `RequestContextMiddleware`
+  already emits the access log, so letting uvicorn's through as well would put two
+  access lines on every request; it stays silenced by level.
+
 ### Changed
 
 - **BREAKING** — `persistence` now declares `sqlalchemy[asyncio]>=2.0.52,<2.1`
