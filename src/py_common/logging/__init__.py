@@ -118,7 +118,32 @@ def setup_logging(
     root.addHandler(handler)
     root.setLevel(log_level)
 
-    # Quiet noisy libs
+    # Adopt uvicorn's own loggers, so the format holds however the process was
+    # started. The `uvicorn` CLI applies uvicorn's LOGGING_CONFIG via dictConfig
+    # *before importing the app*, which gives the `uvicorn` logger its own handler
+    # and `propagate: False`. Replacing the root handler above therefore never
+    # reaches it, and uvicorn's startup and shutdown lines stay plain text in the
+    # middle of an otherwise ECS stream -- a shipper parsing one JSON object per
+    # line drops exactly the lines you want during an incident. `run_uvicorn`
+    # avoids this by passing `log_config=None`, but nothing stops a consumer from
+    # using the CLI.
+    #
+    # `uvicorn.error` needs no entry of its own: uvicorn gives it no handler, so it
+    # propagates to `uvicorn` and is carried by the same fix. Listed anyway, so a
+    # future change to that config cannot quietly reintroduce the problem.
+    for name in ("uvicorn", "uvicorn.error"):
+        uvicorn_logger = logging.getLogger(name)
+        uvicorn_logger.handlers.clear()
+        uvicorn_logger.propagate = True
+
+    # Quiet noisy libs.
+    #
+    # `uvicorn.access` is deliberately *not* adopted above. RequestContextMiddleware
+    # already emits the access log (`request_completed`, with status, duration,
+    # route and request ID), so letting uvicorn's version through as well would put
+    # two access lines on every request. Silencing it by level is what keeps the
+    # library's own access log the only one -- do not "finish the job" by adding
+    # uvicorn.access to the loop above.
     for name in ("uvicorn.access", "httpx", "httpcore"):
         logging.getLogger(name).setLevel(logging.WARNING)
 
