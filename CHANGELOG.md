@@ -8,6 +8,22 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING** — `persistence` now declares `sqlalchemy[asyncio]>=2.0.52,<2.1`
+  instead of an open-ended floor. A service already resolving 2.1.x cannot install
+  this version until the ceiling moves.
+
+  The ceiling exists because of the *instrumentor*, not SQLAlchemy:
+  `opentelemetry-instrumentation-sqlalchemy` declares
+  `sqlalchemy >= 1.0.0, < 2.1.0` — still true of 0.66b0, the newest release as of
+  2026-09-27 — and against 2.1 it refuses to instrument, logging one error at
+  startup and then producing **no database spans at all**. So 2.1 was never
+  working; it was failing silently. Being unable to install is the louder of the
+  two.
+
+  Measured: with the ceiling a fresh resolve gives 2.0.54, without it 2.1.1.
+
 ### Fixed
 
 - `assert_routes_protected` counted a route with *optional* authentication as

@@ -1667,7 +1667,7 @@ requires-dist = [
     { name = "python-multipart", marker = "extra == 'runtime'", specifier = ">=0.0.20" },
     { name = "redis", marker = "extra == 'cache'", specifier = ">=8.1.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.16.6" },
-    { name = "sqlalchemy", extras = ["asyncio"], marker = "extra == 'persistence'", specifier = ">=2.0.52" },
+    { name = "sqlalchemy", extras = ["asyncio"], marker = "extra == 'persistence'", specifier = ">=2.0.52,<2.1" },
     { name = "starlette", marker = "extra == 'http'", specifier = ">=1.6.0" },
     { name = "structlog", specifier = ">=25.3.0" },
     { name = "tenacity", specifier = ">=9.0.0" },
