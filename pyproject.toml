@@ -75,7 +75,17 @@ runtime = [
     "grpcio>=1.83.1",
 ]
 persistence = [
-    "sqlalchemy[asyncio]>=2.0.52",
+    # Ceiling on purpose, and the reason is the instrumentor rather than
+    # SQLAlchemy: opentelemetry-instrumentation-sqlalchemy declares
+    # `sqlalchemy >= 1.0.0, < 2.1.0` -- still true of 0.66b0, checked 2026-09-27 --
+    # and on 2.1 it refuses to instrument, logging one error at startup and then
+    # silently producing no database spans at all. A consumer resolving freely got
+    # 2.1.1 and lost every span while this library's CI, which installs its own
+    # lockfile pin of 2.0.52, saw nothing.
+    #
+    # Raise it when the instrumentor supports 2.1. The `fresh-resolve` workflow is
+    # what reports that the moment it happens.
+    "sqlalchemy[asyncio]>=2.0.52,<2.1",
     # DatabaseSettings.async_dsn hardcodes postgresql+asyncpg, so the extra that
     # provides the engine factory has to provide the driver it names. Without
     # this, create_engine_and_sessionmaker() raises ModuleNotFoundError at the

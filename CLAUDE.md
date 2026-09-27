@@ -60,7 +60,8 @@ red build:
   integration suite that skips locally. Local coverage reads lower for the same
   reason.
 - **Jobs it does not run at all.** `extras-isolation` and `audit` are separate
-  CI jobs, and `make check` invokes neither. Run `make extras-check` by hand
+  CI jobs, `fresh-resolve` is a separate weekly workflow, and `make check` invokes
+  none of them. Run `make extras-check` by hand
   after touching any package `__init__` or moving an import — that is the gate
   0.2.0 shipped four unimportable extras past.
 
@@ -324,6 +325,20 @@ code, so treat these as closed unless something new contradicts them:
   include the runtime tests. Both happened while nothing consumed the library.
   The rule in RELEASING.md stands as written: from `v0.1.0` onward, a tag is
   never moved or deleted — fix a bad release by publishing the next one.
+
+- **`sqlalchemy` is capped below 2.1 on purpose, and the cap is about the
+  instrumentor.** `opentelemetry-instrumentation-sqlalchemy` declares
+  `sqlalchemy >= 1.0.0, < 2.1.0`; on 2.1 it logs one error at startup and then
+  emits no database spans, which is worse than refusing to start. Don't raise the
+  ceiling to make a resolution succeed — raise it when the instrumentor supports
+  2.1, and the `fresh-resolve` workflow is what reports that.
+
+  The general trap it came from: CI resolves from `uv.lock`, so a range that
+  admits an untested version always resolves to the tested one, and the library
+  can ship code nobody has run. `fresh-resolve` runs weekly against the loosest
+  versions the constraints allow, on a schedule rather than per-PR for the same
+  reason `audit` is separate — a new upstream minor is news about the world, not a
+  defect in somebody's branch.
 
 - **`CelerySettings`/`MongoSettings` were deleted, not implemented.** They
   had been exported with no module using them. Don't re-add settings ahead of

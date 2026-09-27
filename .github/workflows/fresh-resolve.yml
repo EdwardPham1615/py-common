@@ -1,0 +1,65 @@
+name: Fresh resolve
+
+# What a consumer installs, not what our lockfile pins.
+#
+# CI resolves from uv.lock, so a dependency range that admits an untested version
+# always resolves to the tested one, and the library can ship code nobody has run.
+# That is not hypothetical: `sqlalchemy[asyncio]>=2.0.52` with no ceiling let the
+# first consuming service resolve 2.1.1, which
+# opentelemetry-instrumentation-sqlalchemy refuses -- every database span vanished,
+# and nothing on this side could have noticed.
+#
+# On a schedule rather than on pull requests, for the reason the `audit` job is
+# separate: a new upstream minor is news about the world, not a defect in
+# somebody's branch, and it should not turn their build red.
+on:
+  schedule:
+    # Mondays, 06:00 UTC. Ahead of the working week so a surprise is found before
+    # anyone plans around it.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fresh-resolve:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.14"
+
+      # --upgrade ignores the pins in uv.lock and takes the newest version each
+      # declared range allows -- exactly what a consumer with no lockfile gets.
+      - name: Resolve the loosest versions our constraints allow
+        run: uv lock --upgrade
+
+      # Printed whether or not the run goes on to fail: when it does fail, this is
+      # the diff that explains why, and when it passes it is the list of versions
+      # the lockfile could safely move to.
+      - name: Report what moved
+        run: |
+          echo '### Versions differing from `uv.lock`' >> "$GITHUB_STEP_SUMMARY"
+          echo '```diff' >> "$GITHUB_STEP_SUMMARY"
+          git diff --unified=0 -- uv.lock \
+            | grep -E '^[+-](name|version) = ' \
+            | head -100 >> "$GITHUB_STEP_SUMMARY" || echo '(nothing moved)' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Sync
+        run: uv sync --extra all --extra dev
+
+      - name: Typecheck
+        run: uv run mypy src/py_common
+
+      # The offline suite only. This job is a weathervane for API breakage in a new
+      # upstream minor; standing up five service containers weekly to re-prove the
+      # integration paths would cost more than it tells us. It therefore does *not*
+      # cover the instrumentation-compatibility failure that prompted it -- the
+      # version ceiling in pyproject.toml handles that one directly.
+      - name: Test
+        run: uv run pytest
