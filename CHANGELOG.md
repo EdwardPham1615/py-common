@@ -10,6 +10,26 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `assert_routes_protected` counted a route with *optional* authentication as
+  protected. A route depending on `Auth.optional_user` lets an anonymous caller
+  through, but it declared the same `HTTPBearer` scheme as `Auth.current_user`,
+  so the generated document was identical and the audit reported success on an
+  endpoint anyone could call — the one thing that helper exists not to do.
+
+  `Auth.optional_user` now declares its own scheme, exported as
+  `py_common.security.OPTIONAL_AUTH_SCHEME`, and the check treats a route whose
+  only requirement is that scheme as open. Nothing about who may call such a route
+  changed; both dependencies still read the same header.
+
+  **This can newly fail a consumer's suite**, which is the point: list
+  optional-auth routes in `public_paths`/`public_prefixes`. A route that is on a
+  `protected_router` *as well* stays protected — the router's guard demands a
+  token, and the check asks whether any declared requirement does.
+
+  The OpenAPI document also gains an `OptionalBearer` security scheme, visible as
+  a second entry in Swagger's Authorize dialog.
+
+
 - `py-common[migrations]` could not import `py_common.persistence.migrations`. It
   failed with *"The SQLAlchemy asyncio module requires that the Python 'greenlet'
   library is installed"* — because importing that submodule runs

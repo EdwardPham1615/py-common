@@ -2,6 +2,7 @@
 
 from py_common.security.auth import (
     INTERNAL_API_KEY_HEADER,
+    OPTIONAL_AUTH_SCHEME,
     Auth,
     internal_router,
     protected_router,
@@ -23,6 +24,7 @@ from py_common.security.service_token import ClientCredentialsTokenProvider
 
 __all__ = [
     "INTERNAL_API_KEY_HEADER",
+    "OPTIONAL_AUTH_SCHEME",
     "AllOf",
     "AnyOf",
     "Auth",

@@ -48,6 +48,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "INTERNAL_API_KEY_HEADER",
+    "OPTIONAL_AUTH_SCHEME",
     "Auth",
     "internal_router",
     "protected_router",
@@ -55,9 +56,18 @@ __all__ = [
 
 INTERNAL_API_KEY_HEADER = "X-API-Key"
 
+#: OpenAPI security-scheme name that :attr:`Auth.optional_user` declares, kept
+#: distinct from the required-auth scheme on purpose. Both dependencies read the
+#: same ``Authorization: Bearer`` header, but a route that merely *may* be
+#: authenticated is not a protected route, and the generated document is the only
+#: place an auditor can tell the two apart -- see
+#: :func:`~py_common.testing.routes.assert_routes_protected`.
+OPTIONAL_AUTH_SCHEME = "OptionalBearer"
+
 logger = get_logger(__name__)
 
 _bearer = HTTPBearer(auto_error=False)
+_optional_bearer = HTTPBearer(scheme_name=OPTIONAL_AUTH_SCHEME, auto_error=False)
 _api_key = APIKeyHeader(name=INTERNAL_API_KEY_HEADER, auto_error=False)
 
 
@@ -97,7 +107,7 @@ class Auth:
             return await validator.decode_async(credentials.credentials)
 
         async def optional_user(
-            credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+            credentials: HTTPAuthorizationCredentials | None = Depends(_optional_bearer),
         ) -> TokenClaims | None:
             if credentials is None or credentials.scheme.lower() != "bearer":
                 return None
@@ -118,6 +128,12 @@ class Auth:
         For an endpoint that serves everyone but serves signed-in callers
         differently. An *invalid* token still raises — silently treating a
         malformed or expired token as "anonymous" would hide a broken client.
+
+        Declares :data:`OPTIONAL_AUTH_SCHEME` rather than the required-auth
+        scheme, so the OpenAPI document says which of the two a route uses. Both
+        read the same header; the distinction exists because
+        :func:`~py_common.testing.routes.assert_routes_protected` would otherwise
+        count an endpoint anyone can call as protected.
         """
         return self._optional_user
 
