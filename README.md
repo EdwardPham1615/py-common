@@ -532,6 +532,15 @@ security scheme. Two things it does not do: it says nothing about
 there is no default rule to compare against), and it only sees protection that
 declares a scheme, so a route guarded by a plain dependency has to be listed.
 
+**Optional authentication counts as open.** A route depending on
+`auth.optional_user` lets an anonymous caller through, so it must appear in the
+allowlist like any other public route. That works because `optional_user`
+declares its own scheme name (`OPTIONAL_AUTH_SCHEME`) rather than the
+required-auth one — both read the same `Authorization` header, and the scheme is
+the only place the document can tell them apart. Put such a route on a
+`protected_router` as well and it is protected again: the router's own guard
+demands a token, and the check asks whether *any* declared requirement does.
+
 ### Why this is not middleware
 
 Middleware is the obvious first idea and it is wrong four times over. It runs

@@ -18,6 +18,7 @@ from py_common.http.middleware import apply_standard_middleware
 from py_common.http.problem import register_exception_handlers
 from py_common.security import (
     INTERNAL_API_KEY_HEADER,
+    OPTIONAL_AUTH_SCHEME,
     Auth,
     HasRole,
     TokenClaims,
@@ -358,3 +359,102 @@ def test_require_roles_refuses_to_guard_nothing(auth: Auth) -> None:
     """``require_roles()`` would read as a guard while admitting everyone."""
     with pytest.raises(ValueError, match="at least one role"):
         auth.require_roles()
+
+
+# --- optional authentication is not protection ---------------------------------
+#
+# A route depending on `Auth.optional_user` lets an anonymous caller through, so
+# it is open. Until `optional_user` declared its own security scheme, the generated
+# document was byte-identical to a `current_user` route's and this audit counted
+# such a route as protected -- reporting success on an endpoint anyone could call,
+# which is the one thing it exists not to do.
+
+
+def _optional_auth_app(auth: Auth) -> FastAPI:
+    """A public card route, a protected one, and the combination of the two.
+
+    ``/public/card`` is the shape that matters: a plain router, optional auth,
+    anyone may call it. ``/api/v1/card`` is on a *protected* router as well, so
+    the router's own guard still demands a token — it is genuinely protected, and
+    the audit must keep saying so.
+    """
+    app = FastAPI()
+    api = protected_router(auth, prefix="/api/v1")
+    public = APIRouter(prefix="/public")
+
+    @public.get("/card")
+    async def public_card(
+        user: TokenClaims | None = Depends(auth.optional_user),  # noqa: B008
+    ) -> dict[str, bool]:
+        return {"signed_in": user is not None}
+
+    @api.get("/card")
+    async def guarded_card(
+        user: TokenClaims | None = Depends(auth.optional_user),  # noqa: B008
+    ) -> dict[str, bool]:
+        return {"signed_in": user is not None}
+
+    @api.get("/me")
+    async def me(user: TokenClaims = Depends(auth.current_user)) -> dict[str, str]:  # noqa: B008
+        return {"sub": user.sub}
+
+    for router in (public, api):
+        app.include_router(router)
+    return app
+
+
+def test_optional_auth_declares_its_own_scheme(auth: Auth) -> None:
+    """The distinction the audit reads, visible in the document itself.
+
+    Both dependencies consume the same ``Authorization: Bearer`` header; the
+    scheme name is the only place the spec can say which of them a route uses.
+    """
+    paths = _optional_auth_app(auth).openapi()["paths"]
+
+    assert paths["/public/card"]["get"]["security"] == [{OPTIONAL_AUTH_SCHEME: []}]
+    assert paths["/api/v1/me"]["get"]["security"] == [{"HTTPBearer": []}]
+    # On a protected router the route declares both: the router's requirement and
+    # its own optional one.
+    assert paths["/api/v1/card"]["get"]["security"] == [
+        {"HTTPBearer": []},
+        {OPTIONAL_AUTH_SCHEME: []},
+    ]
+
+
+def test_an_optional_auth_route_must_be_declared_public(auth: Auth) -> None:
+    """It is reported, and listing it is what makes the intent explicit."""
+    app = _optional_auth_app(auth)
+
+    with pytest.raises(AssertionError) as exc:
+        assert_routes_protected(app)
+    reported = str(exc.value)
+    assert "GET /public/card" in reported
+    assert "/api/v1/me" not in reported
+    # Optional auth *plus* a protected router is still protected -- the check asks
+    # whether any declared requirement demands credentials, not which came last.
+    assert "/api/v1/card" not in reported
+
+    assert_routes_protected(app, public_paths=("/public/card",))
+
+
+def test_an_optional_auth_route_is_still_reachable_both_ways(auth: Auth) -> None:
+    """Changing the declared scheme must not change who gets in."""
+    client = TestClient(_optional_auth_app(auth))
+
+    assert client.get("/public/card").json() == {"signed_in": False}
+    assert client.get("/public/card", headers=BEARER).json() == {"signed_in": True}
+    # And the guarded one still refuses an anonymous caller.
+    assert client.get("/api/v1/card").status_code == 401
+
+
+def test_the_scheme_name_the_checker_looks_for_matches_the_one_auth_declares() -> None:
+    """``testing.routes`` spells the name out instead of importing it.
+
+    It needs only the ``http`` extra, while ``py_common.security`` pulls PyJWT —
+    importing it there would make ``assert_routes_protected`` unusable on a
+    ``py-common[http]`` install, which is the failure `make extras-check` exists
+    to catch. This test is what keeps the two copies from drifting.
+    """
+    from py_common.testing.routes import _OPTIONAL_AUTH_SCHEME
+
+    assert _OPTIONAL_AUTH_SCHEME == OPTIONAL_AUTH_SCHEME
