@@ -9,7 +9,11 @@ when one escapes.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from typing import Any
+
 import pytest
+import structlog
 from fastapi import APIRouter, Depends, FastAPI
 from fastapi.testclient import TestClient
 
@@ -458,3 +462,104 @@ def test_the_scheme_name_the_checker_looks_for_matches_the_one_auth_declares() -
     from py_common.testing.routes import _OPTIONAL_AUTH_SCHEME
 
     assert _OPTIONAL_AUTH_SCHEME == OPTIONAL_AUTH_SCHEME
+
+
+# --- the access log can name the caller ----------------------------------------
+
+
+@pytest.fixture
+def capture_logs() -> Iterator[list[dict[str, Any]]]:
+    """Swallow log events into a list, the way tests/test_timeout.py does."""
+    events: list[dict[str, Any]] = []
+
+    def sink(logger: Any, method_name: str, event_dict: dict[str, Any]) -> Any:
+        events.append(dict(event_dict))
+        raise structlog.DropEvent
+
+    structlog.configure(processors=[sink])
+    try:
+        yield events
+    finally:
+        structlog.reset_defaults()
+
+
+def _logged_app(auth: Auth) -> FastAPI:
+    app = FastAPI()
+    api = protected_router(auth, prefix="/api/v1")
+    public = APIRouter(prefix="/public")
+
+    @api.get("/bare")
+    async def bare() -> dict[str, str]:
+        return {"ok": "yes"}
+
+    @public.get("/card")
+    async def card(user: TokenClaims | None = Depends(auth.optional_user)) -> dict[str, bool]:  # noqa: B008
+        return {"signed_in": user is not None}
+
+    for router in (public, api):
+        app.include_router(router)
+    register_exception_handlers(app)
+    apply_standard_middleware(app, _settings())
+    return app
+
+
+def _access(events: list[dict[str, Any]]) -> dict[str, Any]:
+    completed = [e for e in events if e.get("event") == "request_completed"]
+    assert completed, "no access-log line was emitted"
+    return completed[-1]
+
+
+def test_the_access_log_names_the_authenticated_caller(
+    auth: Auth, capture_logs: list[dict[str, Any]]
+) -> None:
+    """``user.id`` was documented and never populated.
+
+    ``RequestContextMiddleware`` reads ``request.state.user.sub`` into the log
+    (`http/middleware/request_context.py:84`), but nothing in the library wrote
+    that field, so every service had to add its own dependency or accept an access
+    log that could not say who did anything.
+
+    The route carries no claims parameter of its own: the router's authentication
+    is what publishes them.
+    """
+    TestClient(_logged_app(auth)).get("/api/v1/bare", headers=BEARER)
+
+    assert _access(capture_logs)["user"] == {"id": "u-1"}
+
+
+def test_optional_auth_names_the_caller_only_when_there_is_one(
+    auth: Auth, capture_logs: list[dict[str, Any]]
+) -> None:
+    """Anonymous must leave the field absent, not present and empty."""
+    client = TestClient(_logged_app(auth))
+
+    client.get("/public/card")
+    assert "user" not in _access(capture_logs)
+
+    client.get("/public/card", headers=BEARER)
+    assert _access(capture_logs)["user"] == {"id": "u-1"}
+
+
+def test_publishing_the_claims_does_not_cost_a_second_decode(
+    auth: Auth, validator: _StubValidator, capture_logs: list[dict[str, Any]]
+) -> None:
+    """Taking ``Request`` must not defeat FastAPI's per-callable dependency cache.
+
+    A route that also asks for the claims, on a router that already
+    authenticated, still decodes once — the property `Auth.__post_init__` builds
+    its closures once to protect.
+    """
+    app = _logged_app(auth)
+    api = APIRouter(prefix="/api/v2")
+
+    @api.get("/me")
+    async def me(user: TokenClaims = Depends(auth.current_user)) -> dict[str, str]:  # noqa: B008
+        return {"sub": user.sub}
+
+    app.include_router(api, dependencies=[Depends(auth.current_user)])
+    validator.calls = 0
+
+    TestClient(app).get("/api/v2/me", headers=BEARER)
+
+    assert validator.calls == 1
+    assert _access(capture_logs)["user"] == {"id": "u-1"}

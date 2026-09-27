@@ -104,7 +104,12 @@ class RequestContextMiddleware:
     Access-log fields (ECS-inspired): ``request_id``, ``status_code``,
     ``duration_ms``, ``http.request.method``, ``url.path``, ``http.route``,
     ``url.query`` (maskable), ``client.address``, ``user_agent.original``,
-    ``user.id`` (when ``request.state.user`` is set by auth), plus trace/span IDs.
+    ``user.id``, plus trace/span IDs.
+
+    ``user.id`` comes from ``request.state.user.sub``, which
+    :class:`~py_common.security.Auth`'s dependencies publish. It is absent for an
+    anonymous request rather than empty, and absent in a service that does not use
+    those dependencies -- nothing else in the library writes that field.
 
     Also renders unhandled exceptions as Problem Details (``handle_exceptions``,
     on by default). Starlette runs the ``Exception`` handler in
