@@ -176,6 +176,25 @@ Every HTTP request gets an `X-Request-ID` (generated or propagated). It is:
 
 `trace_id` (W3C `traceparent`, automatic via OTel instrumentation) is the primary distributed correlation ID; `X-Request-ID` is the human-friendly complement for clients and log grep.
 
+## Log fields
+
+`setup_logging(json_logs=True)` (the default) emits ECS field names, so a stock ECS index template maps every line with no per-service configuration:
+
+| Field | From |
+|---|---|
+| `@timestamp` | stamped when the event happens, not when it is rendered |
+| `log.level` | derived by `ecs-logging` from the method name |
+| `log.logger` | the logger's name |
+| `message` | the event |
+| `service.name`, `service.environment` | `setup_logging` arguments |
+| `trace.id`, `span.id` | the active OTel span, when there is one |
+| `request_id` | bound by `RequestContextMiddleware` for the request's lifetime |
+| `user.id` | on the access log, from the authenticated caller (see [Route protection](#route-protection)) |
+
+Anything passed as a keyword to a log call lands beside these, so keep those names out of ECS's namespaces.
+
+`json_logs=False` swaps the renderer for the console one, which builds its prefix from `level`, `timestamp` and `logger` — different names on purpose, because `ConsoleRenderer` knows nothing about ECS and prints whatever keys it is given. Use it in a terminal; do not tie it to the environment, or a local run never shows what production emits.
+
 ## Metrics
 
 `setup_telemetry` installs a `MeterProvider` alongside the tracer and pushes metrics to the same OTLP endpoint. Traces let you debug one request; metrics are what you alert on. Two RED instruments come for free:

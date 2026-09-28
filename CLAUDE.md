@@ -312,6 +312,15 @@ code, so treat these as closed unless something new contradicts them:
   two keys and loses the level entirely without them. Adding them back to the
   shared chain restores the duplication.
 
+  The logger name diverges for a different reason, and the fix has the same
+  shape: ECS calls that field `log.logger`, `structlog.stdlib.add_logger_name`
+  writes a top-level `logger`, and `ecs_logging` passes unknown keys through
+  untouched — so the name sat in a field no ECS mapping defines. The JSON branch
+  moves it (`_logger_name_to_ecs`), the console branch does not, because
+  `ConsoleRenderer` gives `logger` a column of its own and renaming it there
+  would demote the name to a trailing `log={...}` pair. Move it, never copy it:
+  `logger` beside `log.logger` is the duplication above, again.
+
 - **Gzip sits outside idempotency and inside metrics.** `IdempotencyMiddleware`
   stores a response and replays it for a repeated key; a compressed body in
   that store would be replayed to a client that never sent

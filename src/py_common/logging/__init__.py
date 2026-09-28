@@ -29,6 +29,32 @@ def _add_otel_context(
     return event_dict
 
 
+def _logger_name_to_ecs(
+    logger: Any,
+    method_name: str,
+    event_dict: dict[str, Any],
+) -> dict[str, Any]:
+    """Move structlog's ``logger`` key to where ECS keeps it: ``log.logger``.
+
+    ``structlog.stdlib.add_logger_name`` writes a top-level ``logger``, and
+    ``ecs_logging.StructlogFormatter`` passes unknown keys through untouched — so
+    the name of the logger arrived under a field no ECS mapping defines. It was
+    still in the line and still greppable; what it was not is *the* field, so
+    "group by logger" in Kibana found nothing and a strict agent treated it as an
+    unmapped extra.
+
+    The nested shape rather than a dotted ``"log.logger"`` key is what
+    ``ecs_logging``'s own :class:`~ecs_logging.StdlibFormatter` emits for the same
+    field, checked against ecs-logging 2.x / ECS 1.6. Both spellings render
+    identically here, so this follows the reference implementation rather than
+    inventing a second convention.
+    """
+    name = event_dict.pop("logger", None)
+    if name is not None:
+        event_dict.setdefault("log", {})["logger"] = name
+    return event_dict
+
+
 def _add_service_info(
     service_name: str,
     environment: str,
@@ -71,13 +97,19 @@ def setup_logging(
     # ConsoleRenderer is the opposite: it reads ``level`` and ``timestamp`` to
     # build its prefix, and without them a dev run loses the level entirely and
     # trails ``@timestamp`` as an ordinary key=value pair.
+    #
+    # The logger name diverges for the same reason. ECS calls that field
+    # ``log.logger``; ConsoleRenderer knows nothing of ECS and prints whatever key
+    # it finds, so the rename belongs on the JSON branch alone.
     renderer: Any
     if json_logs:
         level_processors: list[Any] = []
+        name_processors: list[Any] = [_logger_name_to_ecs]
         timestamper = structlog.processors.TimeStamper(fmt="iso", utc=True, key="@timestamp")
         renderer = ecs_logging.StructlogFormatter()
     else:
         level_processors = [structlog.stdlib.add_log_level]
+        name_processors = []
         timestamper = structlog.processors.TimeStamper(fmt="iso", utc=True)
         renderer = structlog.dev.ConsoleRenderer()
 
@@ -85,6 +117,7 @@ def setup_logging(
         structlog.contextvars.merge_contextvars,
         *level_processors,
         structlog.stdlib.add_logger_name,
+        *name_processors,
         timestamper,
         structlog.processors.StackInfoRenderer(),
         _add_otel_context,
