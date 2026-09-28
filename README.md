@@ -169,7 +169,7 @@ Every HTTP request gets an `X-Request-ID` (generated or propagated). It is:
 - echoed in the response header
 - bound into structlog contextvars (every log line)
 - set as span attribute `http.request.id`
-- forwarded on outbound HTTP via `create_http_client`
+- forwarded on outbound HTTP via `create_http_client` — including the `client_credentials` token fetch and the OIDC discovery call in `security`, which use the same factory
 - forwarded on outbound gRPC (all four RPC shapes) by `request_id_client_interceptors` / read on inbound by `RequestIdServerInterceptor`, which binds it for the duration of the handler (streams included) and restores the previous context afterwards
 
 `GrpcChannelPool` and `GrpcServer` both attach OTel interceptors by default, so `traceparent` flows in *and* out — pass `use_otel_interceptor=False` to either if you instrument gRPC yourself.

@@ -8,6 +8,31 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `ClientCredentialsTokenProvider` and `KeycloakTokenValidator` take an optional
+  `transport`, and both build their client with `create_http_client` instead of a
+  bare `httpx.AsyncClient`.
+
+  Two things follow. The token fetch now gets the same connect retries and
+  `X-Request-ID` propagation as every other outbound call — it sits on the critical
+  path of those calls and was the one hop in the chain with neither. And it is
+  testable: a consumer testing its own API client with `httpx.MockTransport` used to
+  reach the real network for the token, and had to subclass the provider to stop it.
+
+  ```python
+  transport = httpx.MockTransport(handler)
+  provider = ClientCredentialsTokenProvider(settings.keycloak, transport=transport)
+  ```
+
+  Pass a `CircuitBreakerTransport` here to gate the token endpoint on a breaker.
+  On the validator, `transport` reaches `fetch_openid_config` only — the JWKS fetch
+  happens inside `PyJWKClient`, which uses `urllib` rather than httpx.
+
+  Additive: both parameters default to `None` and the request on the wire is
+  unchanged apart from the correlation header.
+
+
 ### Fixed
 
 - The access log can name the caller. `RequestContextMiddleware` has always read
@@ -56,7 +81,6 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
   Measured: with the ceiling a fresh resolve gives 2.0.54, without it 2.1.1.
 
-### Fixed
 
 - `assert_routes_protected` counted a route with *optional* authentication as
   protected. A route depending on `Auth.optional_user` lets an anonymous caller

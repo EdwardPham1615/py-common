@@ -16,6 +16,7 @@ from jwt.exceptions import PyJWKClientError
 from pydantic import BaseModel, Field
 
 from py_common.config import KeycloakSettings
+from py_common.http.client import create_http_client
 
 
 class TokenClaims(BaseModel):
@@ -66,7 +67,16 @@ def unauthorized(detail: str = "Invalid or expired token") -> HTTPException:
 
 @dataclass
 class KeycloakTokenValidator:
+    """Validates Keycloak access tokens against the realm's JWKS.
+
+    ``transport`` is used by :meth:`fetch_openid_config` only, and exists so a
+    consumer can exercise a startup readiness check without a running Keycloak.
+    It does not reach the JWKS fetch: that happens inside ``PyJWKClient``, which
+    uses ``urllib`` rather than httpx and is stubbed in tests instead.
+    """
+
     settings: KeycloakSettings
+    transport: httpx.AsyncBaseTransport | None = None
     _jwks_client: PyJWKClient | None = field(default=None, init=False, repr=False)
     _jwks_fetched_at: float = field(default=0.0, init=False, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
@@ -155,8 +165,8 @@ class KeycloakTokenValidator:
         return await anyio.to_thread.run_sync(self.decode, token)
 
     async def fetch_openid_config(self) -> dict[str, Any]:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(self.settings.openid_config_url, timeout=10.0)
+        async with create_http_client(timeout=10.0, transport=self.transport) as client:
+            resp = await client.get(self.settings.openid_config_url)
             resp.raise_for_status()
             result: dict[str, Any] = resp.json()
             return result

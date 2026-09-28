@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import contextlib
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from typing import Any
 from unittest.mock import MagicMock, patch
 from urllib.parse import parse_qsl
@@ -12,10 +11,12 @@ from urllib.parse import parse_qsl
 import anyio
 import httpx
 import pytest
+import structlog
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from py_common.config import KeycloakSettings
+from py_common.http.client import REQUEST_ID_HEADER
 from py_common.security import (
     Auth,
     ClientCredentialsTokenProvider,
@@ -23,26 +24,6 @@ from py_common.security import (
     TokenClaims,
 )
 from py_common.testing.tokens import RsaKeyPair, generate_rsa_keypair, issue_test_token
-
-
-@contextlib.contextmanager
-def _patched_async_client(
-    handler: Callable[[httpx.Request], httpx.Response],
-) -> Iterator[None]:
-    """Answer every outbound httpx request from ``handler``.
-
-    The code under test builds its own ``httpx.AsyncClient`` inside the method,
-    so there is no client to inject -- swapping the class for the duration is
-    what lets these tests drive Keycloak's side of the exchange.
-    """
-    real = httpx.AsyncClient
-
-    def factory(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
-        return real(transport=httpx.MockTransport(handler))
-
-    with patch("httpx.AsyncClient", factory):
-        yield
-
 
 KC = KeycloakSettings(server_url="http://kc:8080", realm="test", client_id="test-api")
 KC_CONFIDENTIAL = KeycloakSettings(
@@ -196,27 +177,26 @@ def test_forced_refresh_rebuilds_even_inside_the_ttl() -> None:
 
 
 async def test_fetch_openid_config_returns_the_document() -> None:
-    validator = KeycloakTokenValidator(settings=KC)
     captured: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured.append(str(request.url))
         return httpx.Response(200, json={"issuer": KC.issuer, "jwks_uri": KC.jwks_url})
 
-    with _patched_async_client(handler):
-        config = await validator.fetch_openid_config()
+    validator = KeycloakTokenValidator(settings=KC, transport=httpx.MockTransport(handler))
+    config = await validator.fetch_openid_config()
 
     assert config["jwks_uri"] == KC.jwks_url
     assert captured == [KC.openid_config_url]
 
 
 async def test_fetch_openid_config_raises_on_error_status() -> None:
-    validator = KeycloakTokenValidator(settings=KC)
+    validator = KeycloakTokenValidator(
+        settings=KC,
+        transport=httpx.MockTransport(lambda _: httpx.Response(503)),
+    )
 
-    with (
-        _patched_async_client(lambda _: httpx.Response(503)),
-        pytest.raises(httpx.HTTPStatusError),
-    ):
+    with pytest.raises(httpx.HTTPStatusError):
         await validator.fetch_openid_config()
 
 
@@ -443,6 +423,21 @@ def test_a_token_with_no_azp_is_rejected_once_a_list_exists(keypair: RsaKeyPair)
 TOKEN_RESPONSE = {"access_token": "tok-1", "expires_in": 300}
 
 
+def _provider(
+    handler: Callable[[httpx.Request], httpx.Response], **kwargs: Any
+) -> ClientCredentialsTokenProvider:
+    """A provider whose token endpoint is answered by ``handler``, no network.
+
+    This is the whole point of the ``transport`` parameter: before it existed these
+    tests had to swap out ``httpx.AsyncClient`` for the duration, because the
+    provider built its own client inside the method and there was nothing to
+    inject. A consumer testing its own API client had the same problem and no such
+    hook -- it had to subclass the provider.
+    """
+    kwargs.setdefault("settings", KC_CONFIDENTIAL)
+    return ClientCredentialsTokenProvider(transport=httpx.MockTransport(handler), **kwargs)
+
+
 def _token_handler(
     calls: list[httpx.Request], *responses: dict[str, Any]
 ) -> Callable[[httpx.Request], httpx.Response]:
@@ -457,11 +452,10 @@ def _token_handler(
 
 
 async def test_token_is_fetched_with_client_credentials() -> None:
-    provider = ClientCredentialsTokenProvider(settings=KC_CONFIDENTIAL)
     calls: list[httpx.Request] = []
+    provider = _provider(_token_handler(calls))
 
-    with _patched_async_client(_token_handler(calls)):
-        token = await provider.get_token()
+    token = await provider.get_token()
 
     assert token == "tok-1"
     assert str(calls[0].url) == KC_CONFIDENTIAL.token_url
@@ -472,17 +466,37 @@ async def test_token_is_fetched_with_client_credentials() -> None:
     }
 
 
+async def test_the_token_request_carries_the_current_request_id() -> None:
+    """Why the fetch is built with ``create_http_client`` and not by hand.
+
+    A token fetch sits on the critical path of an outbound call, and it used to be
+    the one hop in that chain with no correlation header, no connect retries and no
+    way to put a breaker in front of it. Correlation is the part of that which is
+    observable from outside, so it is what this asserts.
+    """
+    calls: list[httpx.Request] = []
+    provider = _provider(_token_handler(calls))
+
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(request_id="rid-token")
+    try:
+        await provider.get_token()
+    finally:
+        structlog.contextvars.clear_contextvars()
+
+    assert calls[0].headers[REQUEST_ID_HEADER] == "rid-token"
+
+
 async def test_no_scope_is_sent_when_none_is_configured() -> None:
     """The default request stays byte-identical to what it always was.
 
     A service that never configures a scope must see no change on the wire --
     and an empty ``scope=`` is not the same as no ``scope`` at all.
     """
-    provider = ClientCredentialsTokenProvider(settings=KC_CONFIDENTIAL)
     calls: list[httpx.Request] = []
+    provider = _provider(_token_handler(calls))
 
-    with _patched_async_client(_token_handler(calls)):
-        await provider.get_token()
+    await provider.get_token()
 
     # keep_blank_values, or this assertion cannot see the difference it exists
     # for: parse_qsl drops `scope=` silently, so sending an empty scope instead
@@ -498,40 +512,43 @@ async def test_the_configured_scope_is_requested() -> None:
     caller. Verified against a real Keycloak in
     ``tests/integration/test_keycloak_integration.py``."""
     settings = KC_CONFIDENTIAL.model_copy(update={"token_scope": "orders:write orders:read"})
-    provider = ClientCredentialsTokenProvider(settings=settings)
     calls: list[httpx.Request] = []
+    provider = _provider(_token_handler(calls), settings=settings)
 
-    with _patched_async_client(_token_handler(calls)):
-        await provider.get_token()
+    await provider.get_token()
 
     assert dict(parse_qsl(calls[0].content.decode()))["scope"] == "orders:write orders:read"
 
 
 async def test_token_is_cached_until_it_nears_expiry() -> None:
-    provider = ClientCredentialsTokenProvider(settings=KC_CONFIDENTIAL)
     calls: list[httpx.Request] = []
+    provider = _provider(_token_handler(calls))
 
-    with _patched_async_client(_token_handler(calls)):
-        first = await provider.get_token()
-        second = await provider.get_token()
+    first = await provider.get_token()
+    second = await provider.get_token()
 
     assert first == second
     assert len(calls) == 1
 
 
 async def test_token_is_refetched_once_it_has_expired() -> None:
-    provider = ClientCredentialsTokenProvider(settings=KC_CONFIDENTIAL)
+    """Also covers reuse: two fetches go through the same injected transport.
+
+    The client is built and closed per fetch, so an injected transport outlives at
+    least one close.
+    """
     calls: list[httpx.Request] = []
-    handler = _token_handler(
-        calls,
-        {"access_token": "tok-1", "expires_in": 300},
-        {"access_token": "tok-2", "expires_in": 300},
+    provider = _provider(
+        _token_handler(
+            calls,
+            {"access_token": "tok-1", "expires_in": 300},
+            {"access_token": "tok-2", "expires_in": 300},
+        )
     )
 
-    with _patched_async_client(handler):
-        assert await provider.get_token() == "tok-1"
-        provider._expires_at = time.monotonic() - 1  # as if the clock moved past it
-        assert await provider.get_token() == "tok-2"
+    assert await provider.get_token() == "tok-1"
+    provider._expires_at = time.monotonic() - 1  # as if the clock moved past it
+    assert await provider.get_token() == "tok-2"
 
     assert len(calls) == 2
 
@@ -543,12 +560,14 @@ async def test_expiry_is_shortened_by_the_refresh_leeway() -> None:
     between issuing the token and the callee checking it, so a token that is
     technically still valid can arrive expired.
     """
-    provider = ClientCredentialsTokenProvider(settings=KC_CONFIDENTIAL, refresh_leeway_seconds=30)
     calls: list[httpx.Request] = []
+    provider = _provider(
+        _token_handler(calls, {"access_token": "t", "expires_in": 300}),
+        refresh_leeway_seconds=30,
+    )
 
-    with _patched_async_client(_token_handler(calls, {"access_token": "t", "expires_in": 300})):
-        before = time.monotonic()
-        await provider.get_token()
+    before = time.monotonic()
+    await provider.get_token()
 
     assert provider._expires_at - before == pytest.approx(300 - 30, abs=1)
 
@@ -559,42 +578,43 @@ async def test_a_lifetime_below_the_leeway_still_caches_briefly() -> None:
     ``max(..., 1.0)`` is what stops every single call from re-fetching when a
     short-lived token is issued.
     """
-    provider = ClientCredentialsTokenProvider(settings=KC_CONFIDENTIAL, refresh_leeway_seconds=30)
     calls: list[httpx.Request] = []
+    provider = _provider(
+        _token_handler(calls, {"access_token": "t", "expires_in": 5}),
+        refresh_leeway_seconds=30,
+    )
 
-    with _patched_async_client(_token_handler(calls, {"access_token": "t", "expires_in": 5})):
-        before = time.monotonic()
-        await provider.get_token()
-        await provider.get_token()
+    before = time.monotonic()
+    await provider.get_token()
+    await provider.get_token()
 
     assert provider._expires_at - before == pytest.approx(1.0, abs=0.5)
     assert len(calls) == 1
 
 
 async def test_missing_expires_in_falls_back_to_a_minute() -> None:
-    provider = ClientCredentialsTokenProvider(settings=KC_CONFIDENTIAL, refresh_leeway_seconds=0)
     calls: list[httpx.Request] = []
+    provider = _provider(_token_handler(calls, {"access_token": "t"}), refresh_leeway_seconds=0)
 
-    with _patched_async_client(_token_handler(calls, {"access_token": "t"})):
-        before = time.monotonic()
-        await provider.get_token()
+    before = time.monotonic()
+    await provider.get_token()
 
     assert provider._expires_at - before == pytest.approx(60, abs=1)
 
 
 async def test_invalidate_forces_the_next_call_to_refetch() -> None:
-    provider = ClientCredentialsTokenProvider(settings=KC_CONFIDENTIAL)
     calls: list[httpx.Request] = []
-    handler = _token_handler(
-        calls,
-        {"access_token": "tok-1", "expires_in": 300},
-        {"access_token": "tok-2", "expires_in": 300},
+    provider = _provider(
+        _token_handler(
+            calls,
+            {"access_token": "tok-1", "expires_in": 300},
+            {"access_token": "tok-2", "expires_in": 300},
+        )
     )
 
-    with _patched_async_client(handler):
-        assert await provider.get_token() == "tok-1"
-        provider.invalidate()
-        assert await provider.get_token() == "tok-2"
+    assert await provider.get_token() == "tok-1"
+    provider.invalidate()
+    assert await provider.get_token() == "tok-2"
 
     assert len(calls) == 2
 
@@ -606,7 +626,6 @@ async def test_concurrent_callers_fetch_the_token_once() -> None:
     its own token request -- exactly when the service is least able to afford
     the extra load.
     """
-    provider = ClientCredentialsTokenProvider(settings=KC_CONFIDENTIAL)
     calls: list[httpx.Request] = []
 
     async def slow_handler(request: httpx.Request) -> httpx.Response:
@@ -618,15 +637,15 @@ async def test_concurrent_callers_fetch_the_token_once() -> None:
         await anyio.sleep(0.01)
         return httpx.Response(200, json=TOKEN_RESPONSE)
 
+    provider = _provider(slow_handler)
     results: list[str] = []
 
     async def fetch() -> None:
         results.append(await provider.get_token())
 
-    with _patched_async_client(slow_handler):
-        async with anyio.create_task_group() as tg:
-            for _ in range(10):
-                tg.start_soon(fetch)
+    async with anyio.create_task_group() as tg:
+        for _ in range(10):
+            tg.start_soon(fetch)
 
     assert results == ["tok-1"] * 10
     assert len(calls) == 1
@@ -634,12 +653,9 @@ async def test_concurrent_callers_fetch_the_token_once() -> None:
 
 async def test_a_rejected_client_credential_raises() -> None:
     """An invalid secret must not be cached as if it were a token."""
-    provider = ClientCredentialsTokenProvider(settings=KC_CONFIDENTIAL)
+    provider = _provider(lambda _: httpx.Response(401, json={"error": "invalid_client"}))
 
-    with (
-        _patched_async_client(lambda _: httpx.Response(401, json={"error": "invalid_client"})),
-        pytest.raises(httpx.HTTPStatusError),
-    ):
+    with pytest.raises(httpx.HTTPStatusError):
         await provider.get_token()
 
     assert provider._token is None
