@@ -10,6 +10,28 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `Repository.get_or_raise(entity_id, *, detail=None)` — fetch by primary key or
+  raise `AppError.not_found`. The four lines it replaces (fetch, test for `None`,
+  raise, return) were written once per id-based route in every service, and again
+  in every gRPC servicer, which has no dependency injection to hide them behind.
+
+  ```python
+  order = await repo.get_or_raise(order_id, detail=f"No order {order_id}")
+  ```
+
+  `AppError` rather than `HTTPException`, because persistence does not know it is
+  behind HTTP: `py_common.http` renders `ErrorCode.NOT_FOUND` as a 404 problem
+  document and a gRPC servicer maps the same error to `StatusCode.NOT_FOUND`.
+
+  Concrete on the ABC, so `InMemoryRepository` and every existing
+  `SqlAlchemyRepository` subclass inherit it with no change. Additive — nothing
+  abstract was added, so no implementation breaks.
+
+  There is no `error=` parameter for raising something else; a caller who needs a
+  403 that avoids confirming the resource exists still writes the explicit form.
+  Adding the parameter later is additive, whereas shipping it with nothing using it
+  would be surface this library then has to keep.
+
 - `ClientCredentialsTokenProvider` and `KeycloakTokenValidator` take an optional
   `transport`, and both build their client with `create_http_client` instead of a
   bare `httpx.AsyncClient`.
