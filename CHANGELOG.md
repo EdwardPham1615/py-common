@@ -8,6 +8,8 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-28
+
 ### Added
 
 - `Repository.get_or_raise(entity_id, *, detail=None)` — fetch by primary key or

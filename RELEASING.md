@@ -3,7 +3,7 @@
 Releases are **tags on `main`**. Consumers install by pinning a tag:
 
 ```bash
-uv add "py-common[all] @ git+https://github.com/EdwardPham1615/py-common.git@v0.2.1"
+uv add "py-common[all] @ git+https://github.com/EdwardPham1615/py-common.git@v0.3.0"
 ```
 
 That makes a tag the artifact people actually run, so it is treated as
@@ -38,10 +38,14 @@ routine.
 
 3. **Bump the version** in `pyproject.toml` (`[project] version`).
 
-4. **Update the pinned tag in `README.md`.** It appears in more than one place
-   (the uv and pip install lines, and the extras example). This is the easiest
-   step to forget, because nothing fails when you do — the README simply keeps
-   telling new users to install a version you no longer intend them to use.
+4. **Update the pinned tag wherever it appears**, which is four places in
+   `README.md` (the uv and pip install lines, the extras example, and the
+   Governance bullet) and the install line at the top of *this* file. This is the
+   easiest step to forget, because nothing fails when you do — the docs simply
+   keep telling new users to install a version you no longer intend them to use.
+   `grep -rn "v0\.[0-9]*\.[0-9]*" README.md RELEASING.md` before opening the PR;
+   0.3.0 found this file still pinning 0.2.1, having been missed by the step that
+   named only the README.
 
 5. **Open a PR** titled `Release 0.2.0` with those three files, and merge it
    once CI passes.
