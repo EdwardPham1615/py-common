@@ -89,6 +89,36 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **BREAKING** — the JSON log line carries the logger's name as `log.logger`
+  instead of `logger`.
+
+  Before / after, same line:
+
+  ```json
+  {"@timestamp": "...", "log.level": "info", "logger": "app.orders", "message": "created"}
+  {"@timestamp": "...", "log.level": "info", "log": {"logger": "app.orders"}, "message": "created"}
+  ```
+
+  `log.logger` is what ECS calls that field. `structlog.stdlib.add_logger_name`
+  writes a top-level `logger` and `ecs_logging` passes unknown keys through
+  untouched, so the name has always arrived under a field no ECS mapping defines:
+  greppable, but not *the* field, so "group by logger" in Kibana found nothing and
+  a strict agent treated it as an unmapped extra.
+
+  **Migration:** anything selecting on this field needs the new name — saved
+  searches, dashboard filters, log-based alerts, and any index template or
+  ingest pipeline that named `logger` explicitly. Nothing in application code
+  changes; `get_logger("name")` is untouched.
+
+  The nested shape rather than a flat `"log.logger"` key is what `ecs-logging`'s
+  own `StdlibFormatter` emits for this field, so the mixed document (`log.level`
+  dotted beside a `log` object) is the reference implementation's, not ours.
+
+  The console renderer still uses `logger`, and that is deliberate:
+  `ConsoleRenderer` gives the key a column of its own after the level, and
+  renaming it there would demote the name to a trailing `log={'logger': ...}`
+  pair. `json_logs=False` output is unchanged.
+
 - **BREAKING** — `persistence` now declares `sqlalchemy[asyncio]>=2.0.52,<2.1`
   instead of an open-ended floor. A service already resolving 2.1.x cannot install
   this version until the ceiling moves.

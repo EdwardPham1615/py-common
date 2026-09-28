@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
@@ -19,6 +20,8 @@ from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 
 from py_common.logging import current_request_id, get_logger, setup_logging
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
 @pytest.fixture(autouse=True)
@@ -65,7 +68,11 @@ def test_json_output_is_parseable_ecs(capsys: pytest.CaptureFixture[str]) -> Non
     # ecs_logging emits the ECS names as flat dotted keys, which is what an ECS
     # agent reads; asserting on those is asserting on the contract.
     assert record["log.level"] == "info"
-    assert record["logger"] == "t.ecs"
+    # ECS keeps the logger name at log.logger. ecs_logging emits `log.level` as a
+    # flat dotted key and `log` as an object in the same document -- its own
+    # StdlibFormatter does exactly that, so the mixed shape is the library's, not
+    # ours.
+    assert record["log"]["logger"] == "t.ecs"
     assert record["service"] == {"name": "orders", "environment": "staging"}
     assert record["order_id"] == "o-1"
     # ECS requires these two, and an agent that validates the schema drops lines
@@ -174,7 +181,7 @@ def test_stdlib_logging_is_rendered_the_same_way(capsys: pytest.CaptureFixture[s
     (record,) = [json.loads(line) for line in capsys.readouterr().out.strip().splitlines()]
     assert record["message"] == "from stdlib"
     assert record["log.level"] == "warning"
-    assert record["logger"] == "some.vendor.lib"
+    assert record["log"]["logger"] == "some.vendor.lib"
     assert record["service"] == {"name": "orders", "environment": "prod"}
     assert record["ecs.version"]
 
@@ -229,6 +236,40 @@ def test_json_lines_carry_no_duplicate_level_or_timestamp(
     assert record["@timestamp"]
     assert "level" not in record
     assert "timestamp" not in record
+
+
+def test_the_logger_name_is_not_left_under_its_structlog_key(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Moved, not copied.
+
+    Leaving ``logger`` beside ``log.logger`` would be the same defect as ``level``
+    beside ``log.level``: a second indexed field, on every line, saying nothing the
+    first does not. One name per fact.
+    """
+    (record,) = _emit(capsys, "t.oncename")
+
+    assert record["log"]["logger"] == "t.oncename"
+    assert "logger" not in record
+
+
+def test_the_console_branch_keeps_structlogs_own_key(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """ConsoleRenderer gives ``logger`` a column of its own, and only that key.
+
+    It prints the value in brackets after the level. Rename the key there and the
+    name loses that column and reappears as a trailing
+    ``log={'logger': 't.consolename'}`` pair -- a worse dev line in exchange for a
+    convention nothing on this path reads. (Which is more than I assumed: I
+    expected a plain ``logger=`` pair and the renderer proved otherwise.)
+    """
+    setup_logging(json_logs=False)
+    get_logger("t.consolename").info("hello")
+    plain = _ANSI.sub("", capsys.readouterr().out)
+
+    assert "[t.consolename]" in plain
+    assert "log=" not in plain
 
 
 def test_timestamp_is_taken_when_the_event_happens(
