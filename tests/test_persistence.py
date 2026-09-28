@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from py_common.errors import AppError, ErrorCode
 from py_common.persistence import SqlAlchemyRepository, SqlAlchemyUnitOfWork, sqlalchemy_repository
 
 
@@ -72,6 +73,66 @@ async def test_crud_with_non_uuid_custom_named_pk(session: AsyncSession) -> None
 async def test_delete_missing_returns_false(session: AsyncSession) -> None:
     repo = ItemRepository(session)
     assert await repo.delete(9999) is False
+
+
+async def test_get_or_raise_returns_the_entity(session: AsyncSession) -> None:
+    repo = ItemRepository(session)
+    created = await repo.create(Item(name="widget"))
+
+    assert (await repo.get_or_raise(created.item_id)).name == "widget"
+
+
+async def test_get_or_raise_raises_a_transport_neutral_not_found(session: AsyncSession) -> None:
+    """``AppError``, not ``HTTPException``: this layer does not know it is behind HTTP.
+
+    The error code is what carries the meaning — ``py_common.http`` renders
+    ``NOT_FOUND`` as a 404 problem document, and a gRPC servicer maps the same
+    error to ``StatusCode.NOT_FOUND``.
+    """
+    repo = ItemRepository(session)
+
+    with pytest.raises(AppError) as excinfo:
+        await repo.get_or_raise(9999)
+
+    assert excinfo.value.error_code is ErrorCode.NOT_FOUND
+    assert excinfo.value.status_code == 404
+    # Nothing about the missing id by default: the caller opts into a message.
+    assert excinfo.value.detail is None
+
+
+async def test_get_or_raise_passes_the_detail_to_the_client(session: AsyncSession) -> None:
+    repo = ItemRepository(session)
+
+    with pytest.raises(AppError) as excinfo:
+        await repo.get_or_raise(9999, detail="No item 9999")
+
+    assert excinfo.value.detail == "No item 9999"
+
+
+async def test_get_or_raise_returns_a_falsy_entity(session: AsyncSession) -> None:
+    """An entity that is present but falsy is found, not missing.
+
+    Guards the tempting rewrite of ``if entity is None`` to ``if not entity``:
+    any model defining ``__bool__`` or ``__len__`` — an empty collection wrapper,
+    a value object comparing equal to zero — would then 404 while sitting in the
+    database.
+    """
+
+    @dataclass
+    class Falsy:
+        id: int
+
+        def __bool__(self) -> bool:
+            return False
+
+    class FalsyRepository(SqlAlchemyRepository[Falsy, int]):  # type: ignore[type-var]
+        model = Item
+
+        async def get(self, entity_id: int) -> Falsy | None:
+            return Falsy(entity_id)
+
+    repo = FalsyRepository(session)
+    assert (await repo.get_or_raise(1)).id == 1
 
 
 async def test_get_list_pagination(session: AsyncSession) -> None:
@@ -251,6 +312,31 @@ async def test_in_memory_repository_orders_like_the_real_one() -> None:
     # Mixed directions across keys: what a single tuple sort key cannot express.
     assert [r.id for r in await repo.get_list(order_by=["group", "-name"])] == [2, 3, 1]
     assert [r.id for r in await repo.get_list(order_by="name", limit=2, offset=1)] == [2, 1]
+
+
+async def test_the_fake_inherits_get_or_raise_unchanged() -> None:
+    """The fake must not need its own copy, and this is what proves it.
+
+    ``get_or_raise`` is concrete on the ABC precisely so that extending the
+    interface does not silently leave the fake behind — the failure mode the
+    library's own rule about fakes exists to prevent. Written as a behaviour
+    assertion rather than ``hasattr``, because inheriting the name proves nothing
+    about inheriting the behaviour.
+    """
+    from py_common.testing.fakes import InMemoryRepository
+
+    @dataclass
+    class Row:
+        id: int
+
+    repo: InMemoryRepository[Row, int] = InMemoryRepository()
+    await repo.create(Row(1))
+
+    assert (await repo.get_or_raise(1)).id == 1
+    with pytest.raises(AppError) as excinfo:
+        await repo.get_or_raise(2, detail="No row 2")
+    assert excinfo.value.error_code is ErrorCode.NOT_FOUND
+    assert excinfo.value.detail == "No row 2"
 
 
 async def test_in_memory_repository_default_ordering() -> None:

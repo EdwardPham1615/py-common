@@ -584,6 +584,12 @@ Set `HTTP__PROBLEM_TYPE_BASE_URL=https://docs.example.com/problems` to emit abso
 
 **Connection pooling** — `POSTGRES__POOL_RECYCLE_SECONDS` defaults to 1800: pooled connections are dropped and reopened once they reach that age. Whatever sits between the app and Postgres — pgbouncer, a cloud load balancer, a NAT gateway — closes idle connections on its own schedule without telling the pool, and the next checkout then fails with `server closed the connection unexpectedly` at random. **Set this below the shortest idle timeout in front of your database**; the default is wrong if yours is five minutes. `pool_pre_ping` (on by default) catches the same case but pays a round-trip on every checkout, so treat it as the safety net rather than the fix. `POSTGRES__POOL_TIMEOUT_SECONDS` caps how long a request waits for a free connection instead of blocking forever behind an exhausted pool.
 
+**`get_or_raise()` for the id-based route.** `Repository.get_or_raise(entity_id, detail=...)` fetches or raises `AppError.not_found` — the four lines otherwise written once per route, and again in every gRPC servicer. It raises an `AppError` rather than an `HTTPException` because this layer does not know it is behind HTTP: `py_common.http` renders `ErrorCode.NOT_FOUND` as a 404 problem document, and a gRPC servicer maps the same error to `StatusCode.NOT_FOUND`. It is concrete on the ABC, so `InMemoryRepository` behaves identically in tests with no code of its own. For a different error — a 403 that avoids confirming the resource exists — keep the explicit `get()` and raise yourself.
+
+```python
+order = await repo.get_or_raise(order_id, detail=f"No order {order_id}")
+```
+
 **`delete()` bypasses ORM cascades.** `SqlAlchemyRepository.delete` issues a bulk `DELETE` — one round-trip instead of load-then-delete, but `cascade="all, delete-orphan"` relationships are not walked and `before_delete` / `after_delete` listeners never fire. Express cascades as database-level `ON DELETE CASCADE`, or override `delete()` in your subclass.
 
 **Ordering in tests** — `InMemoryRepository.get_list(order_by=...)` takes attribute names (`"created_at"`, `"-created_at"`, or a list of them), since a fake has no SQL to sort with. Hand it a SQLAlchemy column expression and it raises rather than returning an unsorted page that would make the assertion meaningless.
