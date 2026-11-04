@@ -68,6 +68,14 @@ def reader(_provider_reader: InMemoryMetricReader) -> Iterator[InMemoryMetricRea
 
 
 def points(reader: InMemoryMetricReader, name: str) -> list[Any]:
+    """Data points py-common itself recorded under ``name``.
+
+    Filtered by instrumentation scope because FastAPI 0.142 and later ships its own
+    OpenTelemetry and, once a meter provider exists, records
+    ``http.server.request.duration`` and ``http.server.active_requests`` under the
+    scope ``fastapi`` -- the same two names this library's middleware uses. Without
+    the filter every series below counts twice on a current FastAPI.
+    """
     data = reader.get_metrics_data()
     if data is None:
         return []
@@ -75,6 +83,7 @@ def points(reader: InMemoryMetricReader, name: str) -> list[Any]:
         point
         for rm in data.resource_metrics
         for sm in rm.scope_metrics
+        if sm.scope.name == "py_common"
         for metric in sm.metrics
         if metric.name == name
         for point in metric.data.data_points
