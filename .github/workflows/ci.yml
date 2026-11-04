@@ -175,6 +175,47 @@ jobs:
       - name: Each extra stands on its own
         run: ./scripts/check-extras-isolation.sh
 
+  # The floors in pyproject.toml are promises to every consumer, and CI resolves
+  # from uv.lock, so nothing else here ever installs one. That is how a dependabot
+  # bump turned thirteen of them into versions no feature needed: it moved the
+  # lockfile and the floor together, and everything stayed green.
+  #
+  # Installs the lowest version each *direct* dependency allows and runs the
+  # offline suite. A floor that is too low fails here (redis 5.0.0 has no
+  # `aclose`; exporter-prometheus before 0.63b0 takes no `registry`), and a floor
+  # raised without a reason is visible as the one thing that cannot be lowered back.
+  # Per PR, unlike `fresh-resolve`: a floor changes in a pull request, so this is
+  # the defect of somebody's branch.
+  lowest-direct:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.14"
+
+      # Rewrites uv.lock in this checkout; nothing commits it.
+      - name: Sync the lowest allowed versions
+        run: uv sync --resolution lowest-direct --extra all --extra dev
+
+      - name: Lint
+        run: |
+          uv run ruff check src tests
+          uv run ruff format --check src tests *.md .github/*.md .github/ISSUE_TEMPLATE/*.md
+
+      - name: Typecheck
+        run: uv run mypy src/py_common
+
+      # The offline suite only, for the reason `fresh-resolve` gives: service
+      # containers are for proving a change works, not what a floor means.
+      - name: Test
+        run: uv run pytest
+
+      - name: Each extra stands on its own, at its lowest versions
+        run: UV_RESOLUTION=lowest-direct ./scripts/check-extras-isolation.sh
+
   audit:
     runs-on: ubuntu-latest
     steps:
