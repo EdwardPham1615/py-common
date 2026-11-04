@@ -44,6 +44,17 @@ versioning follows [Semantic Versioning](https://semver.org/).
   floors, runs lint, mypy and the offline suite, and checks each extra on its own at
   its lowest versions, so a floor can no longer drift without a test noticing.
 
+- The lockfile now tests FastAPI **0.162.0**, the newest release older than seven
+  days, where it tested 0.141.1. The floor is unchanged by this (0.115.10, above);
+  the suite runs on both ends, the lock and `lowest-direct`.
+
+  One thing a newer FastAPI does that older ones cannot: from 0.142 it ships its own
+  OpenTelemetry, and as soon as a meter provider exists it records
+  `http.server.request.duration` and `http.server.active_requests` under the scope
+  `fastapi` — the same two names `MetricsMiddleware` uses. The metrics tests now
+  read only the `py_common` scope; see the entry on the FastAPI integration for what
+  the library does about the duplicate.
+
 ## [0.3.0] - 2026-09-28
 
 ### Added
