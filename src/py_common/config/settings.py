@@ -144,7 +144,9 @@ class BaseAppSettings(BaseSettings):
         case_sensitive=False,
     )
 
-    environment: Environment = Environment.DEV
+    # No default, on purpose: see resolve_environment. A default here would be the
+    # same silent fallback to dev for anyone passing `_env_file` explicitly.
+    environment: Environment
     app_name: str = "app"
     app_version: str = "0.1.0"
     debug: bool = False
@@ -178,6 +180,29 @@ class BaseAppSettings(BaseSettings):
                 f"{self.environment.value!r}. Set {ENVIRONMENT_VAR} consistently "
                 f"in the process environment or in .env; do not override it in "
                 f"an environment-specific file."
+            )
+
+        if self.is_production:
+            self._refuse_default_credentials()
+
+    def _refuse_default_credentials(self) -> None:
+        """Production does not start on py-common's own placeholder credentials.
+
+        ``DatabaseSettings.password`` and the S3 keys default to values that make
+        local development work with no configuration, which is exactly why they
+        are dangerous: a deployment that forgets to override one starts, connects
+        to a database or bucket that happens to accept them, and reports nothing.
+        """
+        found = [
+            f"{name}.{attr} ({name.upper()}__{attr.upper()})"
+            for name, value in self
+            for model, attr in _CREDENTIAL_DEFAULTS
+            if isinstance(value, model) and getattr(value, attr) == model.model_fields[attr].default
+        ]
+        if found:
+            raise ValueError(
+                "Refusing to start in production with py-common's placeholder "
+                f"credentials still in place: {', '.join(found)}. Set real values."
             )
 
     @property
@@ -333,6 +358,17 @@ class StorageSettings(BaseModel):
     bucket: str = "app"
     use_path_style: bool = True
     public_base_url: str | None = None
+
+
+# (model, field) pairs whose default is a development placeholder that production
+# must not run on. Defined here, below the models, because BaseAppSettings reads it
+# at call time. Only credentials belong: a default host or port is a deployment
+# detail, a default secret is an open door.
+_CREDENTIAL_DEFAULTS: tuple[tuple[type[BaseModel], str], ...] = (
+    (DatabaseSettings, "password"),
+    (StorageSettings, "access_key"),
+    (StorageSettings, "secret_key"),
+)
 
 
 class ProfilerSettings(BaseModel):

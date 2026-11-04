@@ -8,6 +8,36 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Breaking
+
+- **BREAKING** — a missing `ENVIRONMENT` is now an error instead of `dev`.
+
+  `resolve_environment()` (and so `get_environment()` and every `BaseAppSettings`)
+  checks the argument, the process environment, then `.env`; when none says
+  anything it raises, where it used to answer `dev`. The `environment` field of
+  `BaseAppSettings` lost its default for the same reason, so passing `_env_file=`
+  does not reopen the hole.
+
+  The fallback was the bug. A staging service that merely forgot the variable ran
+  as development — API docs open, every production check skipped — and nothing in
+  any log said so. Found by the first consumer's security review, which had to
+  guard against it in the service.
+
+  **Migration:** put `ENVIRONMENT=dev` in the `.env` of every development
+  checkout, and in the test environment of any suite that builds a
+  `BaseAppSettings` (an autouse fixture calling `monkeypatch.setenv("ENVIRONMENT", "dev")` in
+  `conftest.py` is enough; this repository's own does exactly that). Services
+  deployed with `ENVIRONMENT` already set are unaffected.
+
+- **BREAKING** — in `production`, `BaseAppSettings` refuses to start while a
+  credential still has py-common's placeholder value: `POSTGRES__PASSWORD` left at
+  `postgres`, `S3__ACCESS_KEY` or `S3__SECRET_KEY` left at `any`. The error
+  names every offender by the env key to set. `dev` and `staging` are unchanged.
+
+  **Migration:** set real values for those keys in production. A service that was
+  genuinely running on `postgres` / `any` in production should read this as the
+  finding it is.
+
 ### Changed
 
 - Dependency floors are now the lowest versions the test suite actually passes

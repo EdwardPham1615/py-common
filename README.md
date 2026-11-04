@@ -80,7 +80,11 @@ overrides it. The environment itself is resolved in this order:
 1. an explicit argument to `resolve_environment()`
 2. the real `ENVIRONMENT` process environment variable
 3. `ENVIRONMENT` inside `.env`
-4. `dev`
+
+If none of the three says anything, it **raises** — there is no fourth step. A service
+that forgot the variable used to run as `dev` (docs open, production checks skipped,
+nothing in any log to say so); now it does not start. For local development put
+`ENVIRONMENT=dev` in `.env`, once.
 
 Step 3 matters more than it looks. Declaring `ENVIRONMENT=production` in `.env`
 without exporting it is the natural thing to do, and reading only `os.environ`
@@ -90,7 +94,13 @@ production, passes `is_production` checks, and talks to development
 infrastructure, with nothing in the logs to say so.
 
 An invalid value (`prod`, say) raises and names where it came from, rather than
-falling back to `dev` and quietly relaxing security. `get_environment()` and
+falling back to `dev` and quietly relaxing security.
+
+In `production` the settings also refuse py-common's own placeholder credentials —
+`POSTGRES__PASSWORD` left at `postgres`, `S3__ACCESS_KEY` / `S3__SECRET_KEY`
+left at `any` — and name the env keys to set (derived from the field name your settings class gives the group, so `s3:` reads `S3__ACCESS_KEY`). They exist so local development works
+with no configuration, which is why a deployment that forgets one starts, connects
+and says nothing. `get_environment()` and
 `settings.environment` resolve identically, so they cannot disagree, and
 start-up fails outright if the env files were chosen for one environment while
 the settings claim another.

@@ -144,9 +144,89 @@ def test_process_environment_beats_env_file(env_dir: Path, monkeypatch: pytest.M
     assert _EnvSettings().api_key == "from-staging"
 
 
-def test_defaults_to_dev_without_any_signal(env_dir: Path) -> None:
+def test_a_missing_environment_is_an_error_not_dev(env_dir: Path) -> None:
+    """The silent fallback this replaces: a staging service that forgot the variable
+    ran as dev -- docs open, production checks skipped, nothing in a log to say so."""
+    with pytest.raises(ValueError, match=r"ENVIRONMENT is not set.*ENVIRONMENT=dev"):
+        resolve_environment()
+    with pytest.raises(ValueError, match="ENVIRONMENT is not set"):
+        resolve_env_files()
+    with pytest.raises(ValueError, match="ENVIRONMENT is not set"):
+        get_environment()
+
+
+def test_settings_do_not_start_without_an_environment(env_dir: Path) -> None:
+    with pytest.raises(ValueError, match="ENVIRONMENT is not set"):
+        _EnvSettings()
+
+
+def test_an_explicit_env_file_cannot_smuggle_in_dev(env_dir: Path) -> None:
+    """``_env_file=`` skips resolve_environment, so the field must refuse too."""
+    with pytest.raises(ValueError, match="environment"):
+        _EnvSettings(_env_file=None)
+
+
+def test_dev_is_chosen_not_assumed(env_dir: Path) -> None:
+    (env_dir / ".env").write_text("ENVIRONMENT=dev\n")
     assert resolve_environment() is Environment.DEV
-    assert resolve_env_files() == []
+    assert _EnvSettings().environment is Environment.DEV
+
+
+# --- production refuses py-common's placeholder credentials ----------------
+
+
+class _ProdSettings(BaseAppSettings):
+    postgres: DatabaseSettings = DatabaseSettings()
+    storage: StorageSettings = StorageSettings()
+
+
+_REAL = {"POSTGRES__PASSWORD": "real-db", "STORAGE__ACCESS_KEY": "ak", "STORAGE__SECRET_KEY": "sk"}
+
+
+def test_production_refuses_every_placeholder_credential(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    with pytest.raises(ValueError) as excinfo:
+        _ProdSettings(_env_file=None)
+
+    message = str(excinfo.value)
+    # Named by the env key an operator would set, not a Python path.
+    assert "POSTGRES__PASSWORD" in message
+    assert "STORAGE__ACCESS_KEY" in message
+    assert "STORAGE__SECRET_KEY" in message
+
+
+def test_production_starts_once_the_credentials_are_real(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    for key, value in _REAL.items():
+        monkeypatch.setenv(key, value)
+    assert _ProdSettings(_env_file=None).is_production
+
+
+def test_one_placeholder_left_behind_is_enough_to_refuse(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    for key, value in _REAL.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.delenv("STORAGE__SECRET_KEY")
+
+    with pytest.raises(ValueError, match="STORAGE__SECRET_KEY") as excinfo:
+        _ProdSettings(_env_file=None)
+    assert "POSTGRES__PASSWORD" not in str(excinfo.value)
+
+
+@pytest.mark.parametrize("environment", ["dev", "staging"])
+def test_only_production_refuses_the_placeholders(
+    environment: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Staging is not exempt from caring, but the plan draws the line at production:
+    a staging stack commonly *is* the throwaway one these defaults suit."""
+    monkeypatch.setenv("ENVIRONMENT", environment)
+    assert _ProdSettings(_env_file=None).postgres.password == "postgres"
 
 
 def test_invalid_environment_in_env_file_raises(env_dir: Path) -> None:

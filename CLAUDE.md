@@ -176,9 +176,13 @@ inconsistent:
 
 - **Environment resolution is layered and strict.** `resolve_environment()`
   checks (in order) an explicit argument, the real `ENVIRONMENT` process env
-  var, `ENVIRONMENT` inside `.env`, then defaults to `dev`. `.env` loads
-  first, then `.env.{environment}` on top. An invalid value raises and names
-  its source rather than silently falling back to `dev`. `get_environment()`
+  var, `ENVIRONMENT` inside `.env`, and **raises if none says anything** — a
+  missing value used to mean `dev`, so a staging service that forgot it ran with
+  docs open and every production check skipped. `.env` loads first, then
+  `.env.{environment}` on top. An invalid value raises and names its source
+  rather than silently falling back to `dev`. In `production`, `BaseAppSettings`
+  also refuses py-common's own placeholder credentials (`DatabaseSettings.password`,
+  `StorageSettings.access_key`/`secret_key`). `get_environment()`
   and `settings.environment` must always resolve identically.
 - **Fail open on infrastructure, fail closed on authorization.** The rate
   limiter and cache degrade gracefully (and mark the response as degraded in
