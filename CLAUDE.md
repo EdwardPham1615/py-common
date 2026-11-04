@@ -60,9 +60,9 @@ red build:
   `KEYCLOAK_TEST_URL` at the job level, so its single `pytest` run includes the
   integration suite that skips locally. Local coverage reads lower for the same
   reason.
-- **Jobs it does not run at all.** `extras-isolation` and `audit` are separate
-  CI jobs, `fresh-resolve` is a separate weekly workflow, and `make check` invokes
-  none of them. Run `make extras-check` by hand
+- **Jobs it does not run at all.** `extras-isolation`, `lowest-direct` and `audit`
+  are separate CI jobs, `fresh-resolve` is a separate weekly workflow, and
+  `make check` invokes none of them. Run `make extras-check` by hand
   after touching any package `__init__` or moving an import — that is the gate
   0.2.0 shipped four unimportable extras past.
 
@@ -349,6 +349,18 @@ code, so treat these as closed unless something new contradicts them:
   versions the constraints allow, on a schedule rather than per-PR for the same
   reason `audit` is separate — a new upstream minor is news about the world, not a
   defect in somebody's branch.
+
+- **A dependency floor is a version the suite passes on, not a version the lock
+  reached.** `lowest-direct` installs the lowest allowed version of every direct
+  dependency and runs lint, mypy, the offline suite and the per-extra import
+  check. Dependabot is on `versioning-strategy: lockfile-only` so it cannot raise
+  a floor, but a floor raised by hand now needs a reason the job can show: lowering
+  it back turns something red. Reasons recorded so far, so nobody lowers them
+  again: `pydantic` 2.12 (2.11 has no Python 3.14 wheel), `grpcio` 1.75.1 (same),
+  `redis` 5.0.8 (`aclose()`, and the idempotency tests fail below it), `ruff` 0.16.0
+  (first to format Markdown, which `make format-check` depends on),
+  `opentelemetry-exporter-prometheus` 0.63b0 (`registry=`). Floors can only be
+  claimed down to what installs on the Python floor.
 
 - **`CelerySettings`/`MongoSettings` were deleted, not implemented.** They
   had been exported with no module using them. Don't re-add settings ahead of

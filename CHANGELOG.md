@@ -8,6 +8,42 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Dependency floors are now the lowest versions the test suite actually passes
+  on, not whatever the lockfile last moved to. Dependabot's 2026-09-13 bump
+  (`b55aff8`) raised thirteen floors together with the lock, so v0.3.0 promised
+  `redis>=8.1.0` and `fastapi>=0.141.1` with no feature behind either. The one that
+  bit: `redis>=8.1.0` cannot sit beside Celery's `kombu` (measured by the first
+  consumer, thousand-lives).
+
+  | Package | v0.3.0 | now | why not lower |
+  |---|---|---|---|
+  | pydantic | 2.13.5 | 2.12.0 | 2.11 needs `pydantic-core` 2.33, which has no Python 3.14 wheel |
+  | pydantic-settings | 2.15.0 | 2.9.0 | |
+  | python-dotenv | 1.2.3 | 1.0.0 | |
+  | anyio | 4.15.1 | 4.0.0 | |
+  | fastapi | 0.141.1 | 0.115.10 | 0.115.0 caps `starlette<0.39`, below our floor |
+  | starlette | 1.6.0 | 0.46.0 | |
+  | grpcio | 1.83.1 | 1.75.1 | first release with Python 3.14 wheels |
+  | alembic | 1.19.2 | 1.14.0 | |
+  | redis | 8.1.0 | 5.0.8 | 5.0.0 has no `aclose()`; up to 5.0.7 the idempotency tests fail |
+  | ruff (dev) | 0.16.6 | 0.16.0 | first release that formats Markdown, which `make format-check` relies on |
+  | mypy (dev) | 2.3.1 | 1.16.0 | |
+  | pre-commit (dev) | 4.6.2 | 4.2.0 | |
+  | httpx2 (dev) | 2.12.0 | 2.0.0 | first stable release |
+
+  Nothing here changes what the locked, tested set resolves to: `uv.lock` is
+  untouched apart from the recorded specifiers.
+
+  One floor goes **up**: `opentelemetry-exporter-prometheus` from `0.55b0` to
+  `0.63b0`. `setup_metrics(prometheus=True)` passes `registry=` to the reader, which
+  earlier releases reject with a `TypeError` — the declared floor was never true.
+
+  The `lowest-direct` job in CI (new, runs on every pull request) installs these
+  floors, runs lint, mypy and the offline suite, and checks each extra on its own at
+  its lowest versions, so a floor can no longer drift without a test noticing.
+
 ## [0.3.0] - 2026-09-28
 
 ### Added
