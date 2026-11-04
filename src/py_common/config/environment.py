@@ -44,7 +44,11 @@ def resolve_environment(
     1. the ``environment`` argument
     2. the real ``ENVIRONMENT`` process environment variable
     3. ``ENVIRONMENT`` inside the base ``.env`` file
-    4. :attr:`Environment.DEV`
+
+    When none of the three says anything it raises. It used to answer
+    :attr:`Environment.DEV`, which meant a staging service that merely forgot the
+    variable ran as development: docs open, production checks skipped, and no
+    line in any log to say so. Dev now sets ``ENVIRONMENT=dev``, once, in ``.env``.
 
     Step 3 exists because of a chicken-and-egg problem that is otherwise
     silent. Env files are chosen by environment, but the environment is itself
@@ -69,7 +73,13 @@ def resolve_environment(
         if from_file:
             return _coerce(from_file, source=base_env_file)
 
-    return Environment.DEV
+    valid = ", ".join(e.value for e in Environment)
+    raise ValueError(
+        f"{ENVIRONMENT_VAR} is not set (checked the argument, the process environment "
+        f"and {base_env_file}); expected one of: {valid}. Set {ENVIRONMENT_VAR}=dev "
+        f"for local development -- it is not assumed, because a missing value in "
+        f"staging or production would then run as dev."
+    )
 
 
 def resolve_env_files(
