@@ -72,6 +72,19 @@ versioning follows [Semantic Versioning](https://semver.org/).
   The traces you already hold from before this release still contain what they
   contained.
 
+- `ObjectStorageClient` calls are traced. Each of `put_object`, `get_object_bytes`,
+  `delete_object`, `head_object`, `list_objects` and `get_presigned_url` emits a
+  client span named like the S3 operation (`s3 PutObject`, `s3 ListObjectsV2`, …)
+  with `rpc.system`, `rpc.service`, `rpc.method`, `aws.s3.bucket` and, where known,
+  `py_common.s3.size_bytes`; a listing also records its page and object counts.
+  aiobotocore has no instrumentor (botocore's patches the synchronous client), so
+  until now an S3 call was a gap in every trace that went through one.
+
+  Deliberately not recorded: the object key (they routinely embed user ids and file
+  names) and any presigned URL (a bearer credential). A `head_object` that finds
+  nothing is an answer, not an error, and its span says `py_common.s3.found=false`.
+  Costs nothing without a tracer provider.
+
 ### Breaking
 
 - **BREAKING** — a missing `ENVIRONMENT` is now an error instead of `dev`.

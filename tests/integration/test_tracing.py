@@ -159,3 +159,75 @@ def test_redis_spans_do_not_carry_command_arguments(redis_url: str) -> None:
     assert "SET ? ? ? ?" in statements
     assert SECRET not in json.dumps([dict(s.attributes or {}) for s in spans])
     assert os.getenv("REDIS_TEST_URL")  # the fixture skipped otherwise; belt and braces
+
+
+S3_SCRIPT = """
+import asyncio, sys
+
+from py_common.config import StorageSettings
+from py_common.storage import ObjectStorageClient
+from py_common.telemetry import setup_tracing, shutdown_tracing
+
+service_name, tracing_endpoint, secret, s3_endpoint = sys.argv[1:5]
+setup_tracing(service_name=service_name, otlp_endpoint=tracing_endpoint)
+
+
+async def main() -> None:
+    settings = StorageSettings(
+        endpoint_url=s3_endpoint, access_key="pycommon", secret_key="pycommon123",
+        bucket="tracing-it", use_path_style=True,
+    )
+    async with ObjectStorageClient(settings) as storage:
+        await storage.ensure_bucket()
+        await storage.put_object(f"users/{secret}.txt", b"hello", content_type="text/plain")
+        await storage.head_object(f"users/{secret}.txt")
+        await storage.get_object_bytes(f"users/{secret}.txt")
+        key = f"users/{secret}.txt"
+        await storage.get_presigned_url(key, method="put_object", content_length=5)
+        _ = [page async for page in storage.list_objects("users/")]
+        await storage.delete_object(f"users/{secret}.txt")
+
+
+asyncio.run(main())
+shutdown_tracing()
+"""
+
+
+def test_s3_calls_are_traced_and_the_trace_holds_no_signature_or_key(
+    otlp_endpoint: str, jaeger_query_url: str, storage_settings: object
+) -> None:
+    """aiobotocore has no instrumentor, so these spans exist only if the client makes
+    them. Read back from the collector: operation names, the bucket, and -- the point
+    of the second half -- no signed URL and no object key anywhere in the trace."""
+    service_name = f"py_common-it-{uuid.uuid4().hex[:8]}"
+    result = subprocess.run(  # noqa: S603 - fixed argv, this interpreter, literal script
+        [
+            sys.executable,
+            "-c",
+            S3_SCRIPT,
+            service_name,
+            otlp_endpoint,
+            SECRET,
+            storage_settings.endpoint_url,  # type: ignore[attr-defined]
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
+
+    traces = _wait_for_traces(jaeger_query_url, service_name)
+
+    names = {span["operationName"] for trace in traces for span in trace["spans"]}
+    assert {
+        "s3 PutObject",
+        "s3 HeadObject",
+        "s3 GetObject",
+        "s3 GeneratePresignedUrl",
+        "s3 ListObjectsV2",
+        "s3 DeleteObject",
+    } <= names, names
+    assert "tracing-it" in _tag_values(traces, "aws.s3.bucket")
+    everything = json.dumps(traces)
+    assert SECRET not in everything  # the object key
+    assert "X-Amz-Signature" not in everything

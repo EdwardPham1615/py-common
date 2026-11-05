@@ -8,7 +8,13 @@ from typing import Any, Self
 
 import pytest
 from botocore.exceptions import ClientError
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.trace import SpanKind, StatusCode
 
+import py_common.storage as storage_module
 from py_common.config import StorageSettings
 from py_common.storage import ObjectInfo, ObjectStorageClient
 
@@ -304,3 +310,158 @@ async def test_content_length_on_a_download_url_is_an_error_not_a_noop() -> None
     async with storage:
         with pytest.raises(ValueError, match="put_object"):
             await storage.get_presigned_url("k", content_length=10)
+
+
+# --- spans ------------------------------------------------------------------
+#
+# aiobotocore has no instrumentor (the botocore one patches the synchronous client),
+# so without these an S3 call is a hole in every trace that goes through one.
+
+
+@pytest.fixture
+def spans(monkeypatch: pytest.MonkeyPatch) -> InMemorySpanExporter:
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(storage_module, "_tracer", lambda: provider.get_tracer("t"))
+    return exporter
+
+
+def _every_string(exporter: InMemorySpanExporter) -> str:
+    return " ".join(
+        [s.name for s in exporter.get_finished_spans()]
+        + [str(v) for s in exporter.get_finished_spans() for v in (s.attributes or {}).values()]
+    )
+
+
+async def test_every_operation_gets_a_named_client_span(spans: InMemorySpanExporter) -> None:
+    fake = _FakeS3()
+    fake.pages = [_page(("a", 1, _NOW))]
+    storage, _ = _client(fake)
+    async with storage:
+        await storage.put_object("k", b"12345")
+        await storage.get_object_bytes("k")
+        await storage.delete_object("k")
+        await storage.head_object("k")
+        _ = [p async for p in storage.list_objects("pre/")]
+        await storage.get_presigned_url("k")
+
+    finished = spans.get_finished_spans()
+    assert [s.name for s in finished] == [
+        "s3 PutObject",
+        "s3 GetObject",
+        "s3 DeleteObject",
+        "s3 HeadObject",
+        "s3 ListObjectsV2",
+        "s3 GeneratePresignedUrl",
+    ]
+    for span in finished:
+        assert span.kind is SpanKind.CLIENT
+        assert span.attributes is not None
+        assert span.attributes["aws.s3.bucket"] == "default-bucket"
+        assert span.attributes["rpc.service"] == "S3"
+        assert span.status.status_code is StatusCode.UNSET
+
+
+async def test_sizes_are_recorded_where_they_are_known(spans: InMemorySpanExporter) -> None:
+    storage, _ = _client(_FakeS3())
+    async with storage:
+        await storage.put_object("k", b"12345")
+        await storage.get_object_bytes("k")  # the fake streams b"payload"
+        await storage.head_object("k")  # the fake says 42
+        await storage.get_presigned_url("k", method="put_object", content_length=99)
+
+    sizes = [
+        s.attributes["py_common.s3.size_bytes"] for s in spans.get_finished_spans() if s.attributes
+    ]
+    assert sizes == [5, 7, 42, 99]
+
+
+async def test_neither_the_key_nor_the_signed_url_is_ever_recorded(
+    spans: InMemorySpanExporter,
+) -> None:
+    """A presigned URL is a bearer credential, and keys routinely embed user ids.
+
+    The fake returns a URL with a signature in it so there is something to leak.
+    """
+
+    class _Signing(_FakeS3):
+        async def generate_presigned_url(self, **kwargs: Any) -> str:
+            return "https://s3.example/b/k?X-Amz-Signature=TOPSECRET"
+
+    storage, _ = _client(_Signing())
+    async with storage:
+        url = await storage.get_presigned_url("users/alice@example.com/avatar.png")
+        await storage.put_object("users/alice@example.com/avatar.png", b"x")
+        await storage.delete_object("users/alice@example.com/avatar.png")
+
+    assert "TOPSECRET" in url  # the caller still gets it
+    recorded = _every_string(spans)
+    assert "TOPSECRET" not in recorded
+    assert "alice@example.com" not in recorded
+    assert "https://" not in recorded
+
+
+async def test_a_failing_call_marks_its_span_as_an_error(spans: InMemorySpanExporter) -> None:
+    class _Boom(_FakeS3):
+        async def put_object(self, **kwargs: Any) -> None:
+            raise _client_error("AccessDenied", 403)
+
+    storage, _ = _client(_Boom())
+    async with storage:
+        with pytest.raises(ClientError):
+            await storage.put_object("k", b"v")
+
+    (span,) = spans.get_finished_spans()
+    assert span.status.status_code is StatusCode.ERROR
+    assert [e.name for e in span.events] == ["exception"]
+
+
+async def test_a_missing_key_is_an_answer_not_an_error(spans: InMemorySpanExporter) -> None:
+    fake = _FakeS3()
+    fake.head_object_error = _client_error("404", 404)
+    storage, _ = _client(fake)
+    async with storage:
+        assert await storage.head_object("gone") is None
+
+    (span,) = spans.get_finished_spans()
+    assert span.status.status_code is StatusCode.UNSET
+    assert span.attributes is not None
+    assert span.attributes["py_common.s3.found"] is False
+
+
+async def test_a_listing_is_one_span_that_is_not_current_between_pages(
+    spans: InMemorySpanExporter,
+) -> None:
+    """A generator that held its span current across a yield would make it the
+    active span of whatever the consumer does between pages."""
+    fake = _FakeS3()
+    fake.pages = [_page(("a", 1, _NOW), ("b", 1, _NOW)), _page(("c", 1, _NOW))]
+    storage, _ = _client(fake)
+    async with storage:
+        active_between_pages = [
+            trace.get_current_span().get_span_context().is_valid
+            async for _page_of_keys in storage.list_objects()
+        ]
+
+    assert active_between_pages == [False, False]
+    (span,) = spans.get_finished_spans()
+    assert span.name == "s3 ListObjectsV2"
+    assert span.attributes is not None
+    assert (span.attributes["py_common.s3.pages"], span.attributes["py_common.s3.objects"]) == (
+        2,
+        3,
+    )
+
+
+async def test_stopping_a_listing_early_is_not_an_error(spans: InMemorySpanExporter) -> None:
+    fake = _FakeS3()
+    fake.pages = [_page(("a", 1, _NOW)), _page(("b", 1, _NOW))]
+    storage, _ = _client(fake)
+    async with storage:
+        listing = storage.list_objects()
+        await anext(listing)
+        await listing.aclose()  # the consumer has seen enough
+
+    (span,) = spans.get_finished_spans()
+    assert span.status.status_code is StatusCode.UNSET
