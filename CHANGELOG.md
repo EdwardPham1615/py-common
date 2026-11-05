@@ -23,6 +23,25 @@ versioning follows [Semantic Versioning](https://semver.org/).
   Ids above 2**53 must reach JavaScript as strings; the module docstring and README
   say how.
 
+- `ObjectStorageClient` gains the three calls the first consumer made on the raw
+  client:
+
+  - `head_object(key)` returns an `ObjectInfo` (size, content type, last modified),
+    or `None` when the key is missing. Only a missing key is `None`; a denied or
+    failed HEAD still raises, so "absent" cannot be confused with "could not ask".
+  - `list_objects(prefix, *, older_than=None)` is an async iterator of pages of
+    `ObjectInfo`, optionally keeping only objects modified before a timezone-aware
+    cutoff.
+  - `get_presigned_url(..., content_length=)` signs the byte count into a presigned
+    PUT, so AWS S3 refuses a file of any other size. With a method other than
+    `put_object` it raises `ValueError`, unlike `content_type`, which is ignored
+    there: a size limit that silently does nothing is worse than none.
+
+  Additive. Measured against LocalStack: the signature does carry `content-length`,
+  but LocalStack does not enforce it (10 bytes against a URL signed for 5 answers
+  200), so the integration test asserts on the signed headers and the README says
+  to check the server you deploy.
+
 ### Breaking
 
 - **BREAKING** — a missing `ENVIRONMENT` is now an error instead of `dev`.

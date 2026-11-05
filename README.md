@@ -647,6 +647,28 @@ upgrade_to_head(settings.postgres, script_location="alembic")
 
 In `alembic/env.py`, set `target_metadata = Base.metadata` and prefer `build_alembic_config(settings)` for the URL. Keep `POSTGRES__AUTO_MIGRATE=false` in production and run upgrades from a deploy job; enable it only for local/dev if desired via `migration_lifespan_resource`.
 
+## Object storage
+
+`ObjectStorageClient` is one long-lived `aioboto3` client — open it at start-up, close it on shutdown. Beyond put/get/delete/presign it answers the three questions a service asks around a browser upload:
+
+```python
+# Cap the upload: the signed URL only accepts exactly this many bytes.
+url = await storage.get_presigned_url(
+    key, method="put_object", content_type="image/png", content_length=size
+)
+
+# Afterwards: what actually arrived? None means "not there", never "could not ask".
+info = await storage.head_object(key)  # size, content_type, last_modified
+
+# A cleanup job walks the whole bucket a page at a time.
+async for page in storage.list_objects("uploads/", older_than=cutoff):  # tz-aware
+    ...
+```
+
+A presigned PUT cannot otherwise cap its size: it accepts whatever arrives. `content_length` signs the byte count, so AWS S3 rejects any other, and the client must send that same `Content-Length`. Passing it with a download URL raises instead of doing nothing. Self-hosted servers differ — LocalStack, which the integration suite uses, accepts the wrong length even when signed — so check the one you deploy against, and treat `head_object` as the backstop that confirms what landed.
+
+`list_objects` yields lists of `ObjectInfo` rather than one list because a bucket can be large; apply any cap to what you *do* with the keys, not to the listing, or old files still in use crowd the real candidates out of reach.
+
 ## Idempotency keys
 
 A client whose connection drops after the server committed, but before the
