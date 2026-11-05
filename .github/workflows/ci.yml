@@ -188,6 +188,14 @@ jobs:
   # the defect of somebody's branch.
   lowest-direct:
     runs-on: ubuntu-latest
+    env:
+      # `uv run` syncs the environment before it runs anything, and its default
+      # resolution is "highest". Without this, the first `uv run` below quietly
+      # re-resolved the lowest set back upward -- measured: opentelemetry-api 1.42.0
+      # became 1.45.2 and pydantic 2.12.0 became 2.14.3 while opentelemetry-sdk stayed
+      # 1.42.0, an install no consumer has and one the SDK cannot import. Every step
+      # here then ran on that mixture, so the job was testing nothing it claimed to.
+      UV_NO_SYNC: "1"
     steps:
       - uses: actions/checkout@v7
 
