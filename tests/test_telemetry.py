@@ -29,7 +29,8 @@ def test_disabled_sets_up_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
     either. A service that opts out should not open exporter connections."""
     called: list[str] = []
     monkeypatch.setattr(tel, "setup_metrics", lambda **kw: called.append("metrics"))
-    monkeypatch.setattr(tel, "_instrument_libraries", lambda app: called.append("instrument"))
+    monkeypatch.setattr(tel, "_instrument_fastapi", lambda app: called.append("instrument"))
+    monkeypatch.setattr(tel, "_instrument_clients", lambda names: called.append("clients"))
     tel._provider = None
 
     assert tel.setup_telemetry(None, service_name="svc", enabled=False) is None  # type: ignore[arg-type]
@@ -41,7 +42,8 @@ def test_second_call_reuses_provider_and_warns(monkeypatch: pytest.MonkeyPatch) 
     """Reusing the provider is right — but silently ignoring new exporter settings
     would leave someone debugging why their endpoint change had no effect."""
     monkeypatch.setattr(tel, "setup_metrics", lambda **kw: None)
-    monkeypatch.setattr(tel, "_instrument_libraries", lambda app: None)
+    monkeypatch.setattr(tel, "_instrument_clients", lambda names: None)
+    monkeypatch.setattr(tel, "_instrument_fastapi", lambda app: None)
     warnings: list[str] = []
     monkeypatch.setattr(tel.logger, "warning", lambda event, **kw: warnings.append(event))
 
@@ -135,7 +137,8 @@ def stub_sdk(monkeypatch: pytest.MonkeyPatch) -> Any:
     monkeypatch.setattr("opentelemetry.sdk.trace.export.BatchSpanProcessor", _FakeProcessor)
     monkeypatch.setattr(tel.trace, "set_tracer_provider", installed.append)
     monkeypatch.setattr(tel, "setup_metrics", lambda **kw: None)
-    monkeypatch.setattr(tel, "_instrument_libraries", lambda app: None)
+    monkeypatch.setattr(tel, "_instrument_clients", lambda names: None)
+    monkeypatch.setattr(tel, "_instrument_fastapi", lambda app: None)
     tel._provider = None
     return installed
 
@@ -161,6 +164,68 @@ def test_first_call_builds_and_installs_the_provider(stub_sdk: list[Any]) -> Non
     assert exporter.kwargs == {"endpoint": "http://collector:4317", "insecure": False}
 
 
+def test_setup_tracing_needs_no_app(stub_sdk: list[Any]) -> None:
+    """The point of the split: a worker or a script has no FastAPI app to hand over."""
+    provider = tel.setup_tracing(service_name="worker", environment="prod")
+
+    assert provider is tel._provider
+    assert stub_sdk == [provider]
+    assert provider.resource.attributes["service.name"] == "worker"  # type: ignore[union-attr]
+
+
+def test_setup_tracing_instruments_only_the_clients_asked_for(
+    monkeypatch: pytest.MonkeyPatch, stub_sdk: list[Any]
+) -> None:
+    seen: list[Any] = []
+    monkeypatch.setattr(tel, "_instrument_clients", lambda names: seen.append(tuple(names)))
+
+    tel.setup_tracing(service_name="svc", instrument=("httpx", "celery"))
+
+    assert seen == [("httpx", "celery")]
+
+
+def test_setup_tracing_rejects_a_misspelt_instrumentor(stub_sdk: list[Any]) -> None:
+    """A typo would otherwise skip the instrumentor and trace nothing, silently."""
+    with pytest.raises(ValueError, match=r"unknown instrument.*'rediss'"):
+        tel.setup_tracing(service_name="svc", instrument=("rediss",))
+    assert tel._provider is None
+
+
+def test_setup_tracing_disabled_is_inert(stub_sdk: list[Any]) -> None:
+    assert tel.setup_tracing(service_name="svc", enabled=False) is None
+    assert tel._provider is None
+    assert stub_sdk == []
+
+
+def test_setup_telemetry_is_setup_tracing_plus_the_app(
+    monkeypatch: pytest.MonkeyPatch, stub_sdk: list[Any]
+) -> None:
+    order: list[str] = []
+    monkeypatch.setattr(tel, "setup_metrics", lambda **kw: order.append("metrics"))
+    monkeypatch.setattr(tel, "_instrument_clients", lambda names: order.append("clients"))
+    monkeypatch.setattr(tel, "_instrument_fastapi", lambda app: order.append("fastapi"))
+
+    tel.setup_telemetry(None, service_name="svc")  # type: ignore[arg-type]
+
+    assert order == ["metrics", "clients", "fastapi"]
+
+
+def test_shutdown_tracing_shuts_the_provider_down_and_forgets_it() -> None:
+    shut: list[bool] = []
+
+    class _Provider:
+        def shutdown(self) -> None:
+            shut.append(True)
+
+    tel._provider = _Provider()  # type: ignore[assignment]
+    tel.shutdown_tracing()
+
+    assert shut == [True]
+    assert tel._provider is None
+    tel.shutdown_tracing()  # a second call, or one with nothing to do, is fine
+    assert shut == [True]
+
+
 def test_sampler_ratio_is_applied(stub_sdk: list[Any]) -> None:
     """A service that asked for 5% must not silently export everything."""
     provider = tel.setup_telemetry(
@@ -178,7 +243,8 @@ def test_metrics_are_set_up_with_the_same_endpoint(monkeypatch: pytest.MonkeyPat
     signal somewhere nobody is looking."""
     captured: dict[str, Any] = {}
     monkeypatch.setattr(tel, "setup_metrics", lambda **kw: captured.update(kw))
-    monkeypatch.setattr(tel, "_instrument_libraries", lambda app: None)
+    monkeypatch.setattr(tel, "_instrument_clients", lambda names: None)
+    monkeypatch.setattr(tel, "_instrument_fastapi", lambda app: None)
     monkeypatch.setattr(
         "opentelemetry.exporter.otlp.proto.grpc.trace_exporter.OTLPSpanExporter",
         _FakeExporter,
@@ -235,21 +301,7 @@ def _app() -> Any:
     return FastAPI()
 
 
-@pytest.fixture
-def no_optional_instrumentors(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make the four optional instrumentors look uninstalled."""
-    for mod in (
-        "opentelemetry.instrumentation.httpx",
-        "opentelemetry.instrumentation.redis",
-        "opentelemetry.instrumentation.pymongo",
-        "opentelemetry.instrumentation.celery",
-    ):
-        monkeypatch.setitem(sys.modules, mod, None)
-
-
-def test_fastapi_is_instrumented_once_per_app(
-    monkeypatch: pytest.MonkeyPatch, no_optional_instrumentors: None
-) -> None:
+def test_fastapi_is_instrumented_once_per_app(monkeypatch: pytest.MonkeyPatch) -> None:
     """Instrumenting the same app twice would produce duplicate spans per request.
 
     setup_telemetry is called once per process, but the app object survives a
@@ -263,8 +315,8 @@ def test_fastapi_is_instrumented_once_per_app(
     )
     app = _app()
 
-    tel._instrument_libraries(app)
-    tel._instrument_libraries(app)
+    tel._instrument_fastapi(app)
+    tel._instrument_fastapi(app)
 
     assert len(calls) == 1
     assert calls[0]["excluded_urls"] == "health,ready,live"
@@ -272,19 +324,19 @@ def test_fastapi_is_instrumented_once_per_app(
 
 
 def test_a_missing_fastapi_instrumentor_warns_instead_of_raising(
-    monkeypatch: pytest.MonkeyPatch, no_optional_instrumentors: None
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setitem(sys.modules, "opentelemetry.instrumentation.fastapi", None)
     warnings: list[dict[str, Any]] = []
     monkeypatch.setattr(tel.logger, "warning", lambda event, **kw: warnings.append({**kw}))
 
-    tel._instrument_libraries(_app())
+    tel._instrument_fastapi(_app())
 
     assert warnings == [{"instrumentor": "fastapi"}]
 
 
 def test_a_failing_fastapi_instrumentor_does_not_stop_startup(
-    monkeypatch: pytest.MonkeyPatch, no_optional_instrumentors: None
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def boom(app: Any, **kw: Any) -> None:
         raise RuntimeError("instrumentation exploded")
@@ -295,7 +347,7 @@ def test_a_failing_fastapi_instrumentor_does_not_stop_startup(
     logged: list[str] = []
     monkeypatch.setattr(tel.logger, "exception", lambda event, **kw: logged.append(event))
 
-    tel._instrument_libraries(_app())  # must not raise
+    tel._instrument_fastapi(_app())  # must not raise
 
     assert logged == ["otel_instrumentation_failed"]
 
@@ -303,9 +355,6 @@ def test_a_failing_fastapi_instrumentor_does_not_stop_startup(
 def test_optional_instrumentors_are_instrumented_and_not_re_instrumented(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setitem(sys.modules, "opentelemetry.instrumentation.fastapi", None)
-    monkeypatch.setattr(tel.logger, "warning", lambda event, **kw: None)
-
     fresh = _FakeInstrumentor()
     already = _FakeInstrumentor()
     already.is_instrumented_by_opentelemetry = True
@@ -316,7 +365,7 @@ def test_optional_instrumentors_are_instrumented_and_not_re_instrumented(
     for mod in ("opentelemetry.instrumentation.pymongo", "opentelemetry.instrumentation.celery"):
         monkeypatch.setitem(sys.modules, mod, None)
 
-    tel._instrument_libraries(_app())
+    tel._instrument_clients(tel.DEFAULT_INSTRUMENT)
 
     assert fresh.instrumented is True
     assert already.instrumented is False
@@ -326,8 +375,6 @@ def test_a_failing_optional_instrumentor_is_logged_and_skipped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """One broken instrumentor must not take the other three down with it."""
-    monkeypatch.setitem(sys.modules, "opentelemetry.instrumentation.fastapi", None)
-    monkeypatch.setattr(tel.logger, "warning", lambda event, **kw: None)
 
     def explode() -> Any:
         raise RuntimeError("bad instrumentor")
@@ -344,7 +391,7 @@ def test_a_failing_optional_instrumentor_is_logged_and_skipped(
     failures: list[dict[str, Any]] = []
     monkeypatch.setattr(tel.logger, "exception", lambda event, **kw: failures.append({**kw}))
 
-    tel._instrument_libraries(_app())
+    tel._instrument_clients(tel.DEFAULT_INSTRUMENT)
 
     assert failures == [{"instrumentor": "HTTPXClientInstrumentor"}]
     assert survivor.instrumented is True

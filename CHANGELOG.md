@@ -42,6 +42,18 @@ versioning follows [Semantic Versioning](https://semver.org/).
   200), so the integration test asserts on the signed headers and the README says
   to check the server you deploy.
 
+- `setup_tracing()` and `shutdown_tracing()` in `py_common.telemetry`: the tracer
+  provider, the OTLP exporter and the client-library instrumentors (httpx, Redis,
+  pymongo, Celery) without needing a FastAPI app, so a worker, a beat scheduler or a
+  script is traced like a service. `setup_telemetry(app, ...)` is now metrics, then
+  `setup_tracing`, then the app, and `shutdown_telemetry()` calls `shutdown_tracing()`.
+  Behaviour of the existing calls is unchanged.
+
+  Call it after any fork: the batch span processor owns a thread, which a prefork
+  child does not inherit, so a provider built in the parent exports nothing and says
+  nothing. `instrument=` picks which client libraries to trace; an unknown name
+  raises instead of silently tracing less.
+
 ### Breaking
 
 - **BREAKING** — a missing `ENVIRONMENT` is now an error instead of `dev`.
