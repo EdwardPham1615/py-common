@@ -8,6 +8,8 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-05
+
 ### Added
 
 - Snowflake ids in `py_common.utils`: `SnowflakeGenerator`, `configure_snowflake`,

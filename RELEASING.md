@@ -3,7 +3,7 @@
 Releases are **tags on `main`**. Consumers install by pinning a tag:
 
 ```bash
-uv add "py-common[all] @ git+https://github.com/EdwardPham1615/py-common.git@v0.3.0"
+uv add "py-common[all] @ git+https://github.com/EdwardPham1615/py-common.git@v0.4.0"
 ```
 
 That makes a tag the artifact people actually run, so it is treated as
