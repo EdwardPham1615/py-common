@@ -11,7 +11,10 @@ import json
 import os
 import subprocess
 import sys
+import time
 import uuid
+from pathlib import Path
+from typing import IO
 
 import pytest
 
@@ -290,3 +293,89 @@ def test_fastapi_native_telemetry_reaches_the_collector_redacted_and_without_pro
     assert not any("health" in op for op in operations), operations  # probes excluded
     assert _tag_values(traces, "url.query") == ["code=REDACTED&page=2"]
     assert SECRET not in json.dumps(traces)
+
+
+# --- a prefork Celery worker is traced, and joins the trace of whoever sent the task --
+
+TESTS_DIR = Path(__file__).resolve().parents[1]
+
+
+def _probe(
+    command: str, env: dict[str, str], log: IO[bytes] | None = None
+) -> subprocess.Popen[bytes]:
+    return subprocess.Popen(  # noqa: S603 - fixed argv: this interpreter, our own module
+        [sys.executable, "-m", "worker_probe", command],
+        cwd=TESTS_DIR,
+        env=env,
+        stdout=log,
+        stderr=subprocess.STDOUT if log else None,
+    )
+
+
+@pytest.mark.parametrize("start_method", ["fork", "spawn"])
+def test_a_prefork_task_is_a_child_span_of_the_span_that_sent_it(
+    otlp_endpoint: str, jaeger_query_url: str, tmp_path: Path, start_method: str
+) -> None:
+    """A real prefork worker is traced end to end, and joins the sender's trace.
+
+    Two processes, two services, one trace: the sender opens a span and publishes the
+    task, the pool child runs it, and the child's span must come back from Jaeger as a
+    child of the publish span. That needs Celery's instrumentor active in the *child*,
+    the exporter configured there, and the trace context carried in the message headers.
+    Checked under fork and under spawn (macOS's start method).
+
+    What it does not prove: that a provider has to be created after the fork. On
+    opentelemetry-sdk 1.45 it need not be -- starting tracing in the parent, a mutation
+    tried deliberately, still passes under fork, because the SDK re-creates its batch
+    thread in the child. The assertions here fail when a child never starts tracing.
+    """
+    run = uuid.uuid4().hex[:8]
+    worker_service = f"py_common-it-worker-{run}"
+    sender_service = f"py_common-it-sender-{run}"
+    env = {
+        **os.environ,
+        "PROBE_DIR": str(tmp_path),
+        "PROBE_START_METHOD": start_method,
+        "PROBE_OTLP": otlp_endpoint,
+        "APP_NAME": f"py_common-it-{run}",
+        "SENDER_SERVICE": sender_service,
+        "PYTHONPATH": str(TESTS_DIR),
+    }
+    env.pop("FORKED_BY_MULTIPROCESSING", None)
+    # The worker's service name is "<APP_NAME>-worker".
+    worker_service = f"{env['APP_NAME']}-worker"
+
+    log_path = tmp_path / "worker.log"
+    with log_path.open("wb") as log:
+        worker = _probe("worker", env, log)
+        try:
+            time.sleep(6)  # let the pool come up before the task is queued
+            assert _probe("send-traced", env).wait(timeout=60) == 0
+            deadline = time.monotonic() + 45
+            while time.monotonic() < deadline and not (tmp_path / "flag").exists():
+                time.sleep(0.2)
+        finally:
+            # SIGTERM is a warm shutdown: each child runs worker_process_shutdown, which
+            # is what flushes its spans. A child is never told to exit any other way.
+            worker.terminate()
+            try:
+                worker.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                worker.kill()
+
+    assert (tmp_path / "flag").exists(), f"the task never ran:\n{log_path.read_text()[-2500:]}"
+
+    traces = _wait_for_traces(jaeger_query_url, worker_service)
+    assert traces, (
+        f"no trace from the worker reached the collector:\n{log_path.read_text()[-2500:]}"
+    )
+    spans = [span for trace in traces for span in trace["spans"]]
+    by_name = {span["operationName"]: span for span in spans}
+    assert {"send-job", "run/probe.touch"} <= set(by_name), sorted(by_name)
+    # One trace, spanning two services and two processes.
+    assert len({span["traceID"] for span in spans}) == 1
+    task_span = by_name["run/probe.touch"]
+    parent_ids = {ref["spanID"] for ref in task_span.get("references", [])}
+    publish = by_name["apply_async/probe.touch"]
+    assert publish["spanID"] in parent_ids, "the task span is not a child of the publish span"
+    assert by_name["send-job"]["spanID"] in {r["spanID"] for r in publish.get("references", [])}

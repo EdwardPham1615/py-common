@@ -103,8 +103,21 @@ cache = [
 profiling = [
     "fastapi_profiler>=1.5.0",
 ]
+worker = [
+    "celery[redis]>=5.6.0",
+    # 5.7.0 is the first *stable* kombu whose Redis transport takes the keywords
+    # redis-py 7+ passes to Connection.disconnect(); before it, a worker died on the
+    # first lost Redis connection and did not come back (measured by the first
+    # consumer on 5.7.0a1/b1; 5.7.0 checked 2026-11-05). It also admits redis < 9,
+    # which the 5.6 line did not, so the cache extra's redis no longer has to be
+    # held below 6.5 for Celery's sake.
+    "kombu>=5.7.0",
+    # setup_tracing() runs in every worker process; the Redis client is the dead-letter
+    # list and the schedule lock.
+    "py-common[cache,telemetry]",
+]
 all = [
-    "py-common[http,storage,security,telemetry,grpc,runtime,persistence,migrations,cache,profiling]",
+    "py-common[http,storage,security,telemetry,grpc,runtime,persistence,migrations,cache,profiling,worker]",
 ]
 dev = [
     "ruff>=0.16.0",
@@ -180,6 +193,7 @@ module = [
     "ecs_logging.*",
     "grpc.*",
     "fastapi_profiler.*",
+    "celery.*",
 ]
 ignore_missing_imports = true
 

@@ -49,6 +49,7 @@ Core always installs: `pydantic`, `pydantic-settings`, `structlog`, `ecs-logging
 | `migrations` | Alembic (thin helpers; versions stay in the service) |
 | `cache` | redis (client factory, distributed lock, rate limiting) |
 | `profiling` | fastapi_profiler / pyinstrument (opt-in request profiler) |
+| `worker` | Celery + kombu (≥ 5.7.0) + the `cache` and `telemetry` extras: app factory, async tasks, dead letters, schedule locks |
 | `all` | Everything above |
 | `dev` | ruff, mypy, pytest, pre-commit, aiosqlite, fakeredis |
 
@@ -69,7 +70,8 @@ Example: `uv add "py-common[http,persistence,runtime] @ git+https://github.com/E
 | `cache` | Redis factory, value cache (`Cache` / `@cached`, stampede-protected), distributed lock (auto-extend), fixed- and sliding-window rate limiters |
 | `runtime` | FastAPI shell, lifespan composer, gRPC server + client channel pool (request-id interceptors), uvicorn runner |
 | `persistence` | Engine/sessionmaker, structured query logging, `Base` + naming convention, Alembic helpers, `Repository` / `UnitOfWork` |
-| `utils` | `retry_async` (tenacity), `new_nanoid` / `new_uuid7`, `Clock` / `FixedClock`, `AsyncCircuitBreaker` |
+| `utils` | `retry_async` (tenacity), `new_nanoid` / `new_uuid7` / snowflake ids, `Clock` / `FixedClock`, `AsyncCircuitBreaker` |
+| `worker` | Celery app wired to settings, logging and tracing; `async def` tasks on one event loop per process; dead letters; schedule locks |
 | `testing` | `FakeUnitOfWork`, `InMemoryRepository`, JWT test-token factory, `assert_routes_protected` |
 
 ## Configuration and environments
@@ -230,7 +232,57 @@ setup_telemetry(app, service_name=..., fastapi_native=settings.otel.fastapi_nati
 
 **Secrets are scrubbed before spans leave the process.** Instrumentors record whatever they are handed, and the httpx and FastAPI ones hand over the whole URL — `?key=…`, `?token=…`, a presigned S3 signature. `setup_tracing` exports through a wrapper that replaces the value of credential-named query parameters (`key`, `token`, `code`, `state`, `password`, `signature`, `X-Amz-Signature`, `X-Amz-Credential`, `X-Amz-Security-Token`; exact names, any case) with `REDACTED`, and blanks `Authorization` / `Cookie` headers if an instrumentor captures them. Add your own names with `OTEL__REDACT_QUERY_PARAMS` (pass `settings.otel.redact_query_params` as `redact_query_params=`). Exception messages and other free text in span events are not touched. Redis spans need no help: the instrumentor already records `SET ? ? ?`, and a test pins that.
 
-**Call `setup_tracing` in the process that does the work, after any fork.** The batch span processor owns a thread, and threads do not survive `fork()`: a provider built in a parent and inherited by a prefork child exports nothing, with no error. A Celery worker calls it from `worker_process_init`, not at import time.
+**Call `setup_tracing` in the process that does the work.** Under spawn — what macOS uses for Celery pool children — a child is a fresh interpreter and inherits no provider, so a worker calls it from `worker_process_init`, which runs in every child on every platform. Under fork a provider built earlier also exports on current SDKs (measured on 1.45: the batch processor re-creates its thread in the child), but that is the SDK's doing and not worth relying on.
+
+## Celery workers
+
+The `worker` extra runs this library's async code (persistence, storage, cache) from Celery tasks, which are synchronous. One event loop per worker process, one unit of work per task, retries, a dead-letter list, and a lock so a scheduled run and a manual one never overlap.
+
+```python
+from py_common.worker import Worker, WorkerRuntime
+
+
+class Runtime(WorkerRuntime):  # add the service's own clients
+    def __init__(self, settings):
+        super().__init__(settings)
+        self.storage = ObjectStorageClient(settings.storage)
+
+    async def aclose(self):
+        await self.storage.close()
+        await super().aclose()
+
+
+worker = Worker(
+    "orders",
+    settings,
+    runtime_factory=Runtime,
+    include=["orders.tasks"],
+    task_routes={"slow.*": {"queue": "slow"}},
+    beat_schedule={...},
+)
+
+
+@worker.task("orders.sync", lock=True)  # lock=True: never two at once
+async def sync(runtime: Runtime, order_id: str) -> None:
+    async with runtime.uow() as uow:  # one per task, like one per request
+        ...
+```
+
+`settings` declares `worker: WorkerSettings` (`WORKER__BROKER_URL`, `WORKER__MAX_RETRIES`, …) and `redis: RedisSettings`; a `postgres: DatabaseSettings` gives the runtime an engine, and an `otel: OtelSettings` switches tracing on. Start it with `celery -A orders.app:worker.celery worker`, and `beat` with the same `-A`.
+
+**Every task must be safe to run twice.** Acknowledgement is late, so a task running in a killed worker goes back on the queue. The cheap way to get there is to pass an *id* and re-read current state, not to pass data.
+
+What `Worker` does so you do not have to find out in production:
+
+- **Nothing async at import.** Creating the app connects to nothing, so an API process can import it just to *send* tasks. The runtime — loop, Redis, engine — is built on the first task in each process, after any fork; async connections cannot cross one.
+- **macOS pool children are spawned, not forked,** and a spawned child lacks the trace setup Celery's main process did, so every task failed before its own code ran (`not enough values to unpack`). `FORKED_BY_MULTIPROCESSING` is set for you.
+- **Logging is this library's,** installed through Celery's `setup_logging` signal in the main process and every child. That signal also stops Celery redirecting a child's `sys.stdout`, which swallowed every record after the first task. Task name, id and retry count ride on each line as `task.name`, `task.id`, `task.retries`.
+- **Tracing starts in each child** (`worker_process_init`) and in beat, and flushes as the process stops. A task's span is a child of the span that sent it.
+- **A task that runs out of retries is dead-lettered** to a Redis list (`WORKER__DEAD_LETTER_KEY`): name, args, error, time. `list_dead_letters(redis, key)` reads it; `requeue_dead_letters(worker.celery, redis, key)` sends them again.
+
+**If you create snowflake ids in a worker, give each process its own worker id.** A prefork pool runs several processes from one settings object, so `SNOWFLAKE__WORKER_ID` alone would hand them all the same id. Derive it in your `Runtime` (base id × concurrency + child index) before calling `configure_snowflake`.
+
+kombu 5.7.0 is the floor because earlier releases died on the first lost Redis connection when paired with redis-py 7+ (`disconnect() got an unexpected keyword argument 'error'`); it also admits redis < 9, so the cache extra's redis no longer has to be held back for Celery.
 
 ## Metrics
 

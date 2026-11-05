@@ -342,6 +342,25 @@ class SnowflakeSettings(BaseModel):
     worker_id: int = Field(default=0, ge=0, le=1023)
 
 
+class WorkerSettings(BaseModel):
+    """Celery workers -- env keys ``WORKER__BROKER_URL`` and so on.
+
+    Nested under a service's settings as ``worker`` (the ``worker`` extra reads it).
+    """
+
+    # The same Redis as the cache, on its own database number.
+    broker_url: str = "redis://localhost:6379/1"
+    timezone: str = "UTC"
+    max_retries: int = 5
+    retry_backoff_seconds: int = 1
+    # Redis list holding tasks that ran out of retries.
+    dead_letter_key: str = "jobs:failed"
+    # TTL of the lock a `lock=True` task takes; it extends itself while the task runs.
+    lock_ttl_seconds: float = 300.0
+    # Run tasks in the calling process, without a broker (tests only).
+    eager: bool = False
+
+
 class OtelSettings(BaseModel):
     enabled: bool = True
     service_name: str = "app"

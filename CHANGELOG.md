@@ -49,10 +49,13 @@ versioning follows [Semantic Versioning](https://semver.org/).
   `setup_tracing`, then the app, and `shutdown_telemetry()` calls `shutdown_tracing()`.
   Behaviour of the existing calls is unchanged.
 
-  Call it after any fork: the batch span processor owns a thread, which a prefork
-  child does not inherit, so a provider built in the parent exports nothing and says
-  nothing. `instrument=` picks which client libraries to trace; an unknown name
-  raises instead of silently tracing less.
+  Call it in the process that does the work: under spawn (macOS pool children) a
+  child inherits no provider, so a worker starts it from `worker_process_init`.
+  (The first version of this note claimed a provider built before a fork exports
+  nothing from its children. On opentelemetry-sdk 1.45 it does, because the SDK
+  re-creates its batch thread in the child; the claim was untested and is withdrawn.)
+  `instrument=` picks which client libraries to trace; an unknown name raises
+  instead of silently tracing less.
 
 - Exported spans no longer carry credentials in their URLs. The httpx and FastAPI
   instrumentors record the full URL, query string included, as `http.url` (FastAPI's
@@ -99,6 +102,31 @@ versioning follows [Semantic Versioning](https://semver.org/).
   aside), so the default path is unchanged. `setup_telemetry` warns if it finds a
   native app whose metrics were left on. A `telemetry=` you pass to
   `create_base_app` yourself wins.
+
+- The `worker` extra (`py_common.worker`): Celery workers that run this library's async
+  code. `Worker(name, settings, ...)` builds the Celery app from `WorkerSettings`
+  (`WORKER__*`) with JSON-only messages, late acknowledgement and one message
+  prefetched; `@worker.task(name, lock=...)` registers an `async def job(runtime, ...)`
+  with exponential back-off and jitter, and runs it on one event loop per worker
+  process with a `WorkerRuntime` (Redis, optional engine, `uow()`) built on first use.
+  Tasks that run out of retries are dead-lettered to a Redis list, with
+  `list_dead_letters` and `requeue_dead_letters`; `lock=True` takes a non-blocking
+  Redis lock so a scheduled run and a manual one never overlap. Task name, id and retry
+  count are bound to every log line as `task.name`, `task.id`, `task.retries`.
+
+  It carries the fixes found running a real worker on macOS, each pinned by a test that
+  starts an actual prefork worker (spawn and fork): `FORKED_BY_MULTIPROCESSING`, so
+  spawned children do not fail every task; and logging installed through Celery's
+  `setup_logging` signal, which both formats child output as ECS JSON and keeps
+  Celery's stdout redirect (which silences a child after its first task) off. Tracing
+  starts in each child and in beat, and a task's span is a child of the span that sent
+  it, verified against Jaeger.
+
+  `kombu>=5.7.0` is the extra's floor. Earlier releases died on the first lost Redis
+  connection when paired with redis-py 7+; 5.7.0 is the first stable release that
+  accepts the keywords redis-py passes to `disconnect()` (a test reads both installed
+  sources and fails if a pairing reintroduces it). It also admits redis < 9, so nothing
+  has to hold the cache extra's redis below 6.5 for Celery any more.
 
 ### Breaking
 

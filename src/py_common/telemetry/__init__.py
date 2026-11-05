@@ -103,11 +103,13 @@ def setup_tracing(
     process: a second call reuses it, logs a warning, and ignores the new exporter
     settings.
 
-    **Call it in the process that does the work, after any fork.** The batch span
-    processor owns a thread, and a thread does not survive ``fork()``: a provider
-    built in a parent and inherited by a prefork child exports nothing, silently.
-    A Celery worker therefore calls this from ``worker_process_init``, not at import.
-    Call :func:`shutdown_tracing` when the process stops so buffered spans flush.
+    **Call it in the process that does the work.** Under spawn -- what macOS uses for
+    Celery pool children -- a child is a fresh interpreter and inherits no provider, so
+    a worker calls this from ``worker_process_init``, which runs in every child on every
+    platform. Under fork, a provider built before the fork also exports on current SDKs
+    (measured on 1.45: the batch processor re-creates its thread in the child), but
+    that is the SDK's doing and not worth depending on. Call :func:`shutdown_tracing`
+    when the process stops so buffered spans flush.
 
     Secrets are scrubbed from exported spans (see
     :class:`~py_common.telemetry.redact.RedactingSpanExporter`): credential-named

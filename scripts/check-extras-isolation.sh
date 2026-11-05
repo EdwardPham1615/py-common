@@ -28,6 +28,7 @@ CASES=(
   "persistence:py_common.persistence"
   "migrations:py_common.persistence.migrations"
   "profiling:py_common.telemetry.profiler"
+  "worker:py_common.worker"
 )
 
 # Deliberately not a case: `grpc` on its own. It contributes grpcio and the OTel

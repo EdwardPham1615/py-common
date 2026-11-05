@@ -22,6 +22,7 @@ from py_common.config import (
     ServerSettings,
     SnowflakeSettings,
     StorageSettings,
+    WorkerSettings,
     get_environment,
     resolve_env_files,
 )
@@ -319,6 +320,7 @@ SETTINGS_GROUPS = {
     "HTTP": HttpSettings,
     "SERVER": ServerSettings,
     "SNOWFLAKE": SnowflakeSettings,
+    "WORKER": WorkerSettings,
 }
 
 
