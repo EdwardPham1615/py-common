@@ -11,6 +11,7 @@ from py_common.config.settings import (
     ProfilerSettings,
     RedisSettings,
     ServerSettings,
+    SnowflakeSettings,
     StorageSettings,
 )
 
@@ -25,6 +26,7 @@ __all__ = [
     "ProfilerSettings",
     "RedisSettings",
     "ServerSettings",
+    "SnowflakeSettings",
     "StorageSettings",
     "get_environment",
     "resolve_env_files",
