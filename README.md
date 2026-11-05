@@ -683,6 +683,8 @@ async for page in storage.list_objects("uploads/", older_than=cutoff):  # tz-awa
     ...
 ```
 
+Each call is a client span named like the S3 operation (`s3 PutObject`, `s3 ListObjectsV2`, …) carrying the bucket and sizes — `aiobotocore` has no instrumentor, so without these S3 is a hole in every trace. The object key and any presigned URL are deliberately never recorded: keys routinely embed user ids, and a signed URL is a bearer credential.
+
 A presigned PUT cannot otherwise cap its size: it accepts whatever arrives. `content_length` signs the byte count, so AWS S3 rejects any other, and the client must send that same `Content-Length`. Passing it with a download URL raises instead of doing nothing. Self-hosted servers differ — LocalStack, which the integration suite uses, accepts the wrong length even when signed — so check the one you deploy against, and treat `head_object` as the backstop that confirms what landed.
 
 `list_objects` yields lists of `ObjectInfo` rather than one list because a bucket can be large; apply any cap to what you *do* with the keys, not to the listing, or old files still in use crowd the real candidates out of reach.

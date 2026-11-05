@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from types import TracebackType
@@ -11,6 +12,8 @@ from typing import Any, BinaryIO, Self
 import aioboto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
+from opentelemetry import trace
+from opentelemetry.trace import Span, SpanKind, Tracer
 
 from py_common.config import StorageSettings
 
@@ -20,6 +23,39 @@ __all__ = ["ObjectInfo", "ObjectStorageClient"]
 # no body to carry an error document: AWS answers a bare 404 (code "404"), others
 # send NoSuchKey or NotFound.
 _MISSING_KEY_CODES = frozenset({"404", "NoSuchKey", "NotFound"})
+
+
+def _tracer() -> Tracer:
+    # A function and not a module-level tracer: the global provider is installed after
+    # this module is imported (setup_tracing runs at start-up), and tests substitute
+    # their own.
+    return trace.get_tracer("py_common.storage")
+
+
+@contextmanager
+def _s3_span(operation: str, bucket: str, **attributes: Any) -> Iterator[Span]:
+    """One client span per storage call, named like the S3 operation.
+
+    botocore has an instrumentor, but it patches the synchronous client only; this
+    library talks to S3 through aiobotocore, which that does not reach. So the spans
+    are made here, by hand.
+
+    Attributes are deliberately few: the bucket and sizes, never the object key (they
+    routinely embed user ids and file names) and never a presigned URL, which is a
+    bearer credential.
+    """
+    with _tracer().start_as_current_span(
+        f"s3 {operation}",
+        kind=SpanKind.CLIENT,
+        attributes={
+            "rpc.system": "aws-api",
+            "rpc.service": "S3",
+            "rpc.method": operation,
+            "aws.s3.bucket": bucket,
+            **attributes,
+        },
+    ) as span:
+        yield span
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,17 +148,23 @@ class ObjectStorageClient:
         bucket: str | None = None,
         metadata: dict[str, str] | None = None,
     ) -> str:
-        await self.client.put_object(
-            Bucket=bucket or self.settings.bucket,
-            Key=key,
-            Body=body,
-            ContentType=content_type,
-            Metadata=metadata or {},
-        )
+        bucket = bucket or self.settings.bucket
+        # A stream has no length until it is read; only bytes are sized.
+        sizes = {"py_common.s3.size_bytes": len(body)} if isinstance(body, bytes) else {}
+        with _s3_span("PutObject", bucket, **sizes):
+            await self.client.put_object(
+                Bucket=bucket,
+                Key=key,
+                Body=body,
+                ContentType=content_type,
+                Metadata=metadata or {},
+            )
         return key
 
     async def delete_object(self, key: str, *, bucket: str | None = None) -> None:
-        await self.client.delete_object(Bucket=bucket or self.settings.bucket, Key=key)
+        bucket = bucket or self.settings.bucket
+        with _s3_span("DeleteObject", bucket):
+            await self.client.delete_object(Bucket=bucket, Key=key)
 
     async def get_presigned_url(
         self,
@@ -145,22 +187,30 @@ class ObjectStorageClient:
         """
         if content_length is not None and method != "put_object":
             raise ValueError("content_length can only be signed for method='put_object'")
-        params: dict[str, Any] = {"Bucket": bucket or self.settings.bucket, "Key": key}
+        bucket = bucket or self.settings.bucket
+        params: dict[str, Any] = {"Bucket": bucket, "Key": key}
         if content_type and method == "put_object":
             params["ContentType"] = content_type
         if content_length is not None:
             params["ContentLength"] = content_length
-        url: str = await self.client.generate_presigned_url(
-            ClientMethod=method,
-            Params=params,
-            ExpiresIn=expires_in,
-        )
+        # Never records the URL it returns: the signature in it is a credential.
+        sizes = {} if content_length is None else {"py_common.s3.size_bytes": content_length}
+        with _s3_span("GeneratePresignedUrl", bucket, **sizes) as span:
+            span.set_attribute("py_common.s3.presigned_method", method)
+            url: str = await self.client.generate_presigned_url(
+                ClientMethod=method,
+                Params=params,
+                ExpiresIn=expires_in,
+            )
         return url
 
     async def get_object_bytes(self, key: str, *, bucket: str | None = None) -> bytes:
-        resp = await self.client.get_object(Bucket=bucket or self.settings.bucket, Key=key)
-        async with resp["Body"] as stream:
-            data: bytes = await stream.read()
+        bucket = bucket or self.settings.bucket
+        with _s3_span("GetObject", bucket) as span:
+            resp = await self.client.get_object(Bucket=bucket, Key=key)
+            async with resp["Body"] as stream:
+                data: bytes = await stream.read()
+            span.set_attribute("py_common.s3.size_bytes", len(data))
             return data
 
     async def head_object(self, key: str, *, bucket: str | None = None) -> ObjectInfo | None:
@@ -170,12 +220,18 @@ class ObjectStorageClient:
         "absent" cannot be confused with "could not ask". This is how a service checks
         what a browser actually uploaded to a presigned URL before trusting it.
         """
-        try:
-            head = await self.client.head_object(Bucket=bucket or self.settings.bucket, Key=key)
-        except ClientError as exc:
-            if exc.response.get("Error", {}).get("Code", "") in _MISSING_KEY_CODES:
-                return None
-            raise
+        bucket = bucket or self.settings.bucket
+        with _s3_span("HeadObject", bucket) as span:
+            try:
+                head = await self.client.head_object(Bucket=bucket, Key=key)
+            except ClientError as exc:
+                if exc.response.get("Error", {}).get("Code", "") in _MISSING_KEY_CODES:
+                    # An answer, not a failure: the span stays OK, and says what it found.
+                    span.set_attribute("py_common.s3.found", False)
+                    return None
+                raise
+            span.set_attribute("py_common.s3.found", True)
+            span.set_attribute("py_common.s3.size_bytes", int(head["ContentLength"]))
         return ObjectInfo(
             key=key,
             size=int(head["ContentLength"]),
@@ -201,14 +257,41 @@ class ObjectStorageClient:
         """
         if older_than is not None and older_than.tzinfo is None:
             raise ValueError("older_than must be timezone-aware")
+        bucket = bucket or self.settings.bucket
         paginator = self.client.get_paginator("list_objects_v2")
-        async for page in paginator.paginate(Bucket=bucket or self.settings.bucket, Prefix=prefix):
-            infos = [
-                ObjectInfo(
-                    key=str(item["Key"]), size=int(item["Size"]), last_modified=item["LastModified"]
-                )
-                for item in page.get("Contents", [])
-                if older_than is None or item["LastModified"] < older_than
-            ]
-            if infos:
-                yield infos
+        # start_span, not start_as_current_span: this is a generator, and a span made
+        # current across a `yield` would stay the caller's active span between pages.
+        span = _tracer().start_span(
+            "s3 ListObjectsV2",
+            kind=SpanKind.CLIENT,
+            attributes={
+                "rpc.system": "aws-api",
+                "rpc.service": "S3",
+                "rpc.method": "ListObjectsV2",
+                "aws.s3.bucket": bucket,
+            },
+        )
+        pages = objects = 0
+        try:
+            async for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+                pages += 1
+                infos = [
+                    ObjectInfo(
+                        key=str(item["Key"]),
+                        size=int(item["Size"]),
+                        last_modified=item["LastModified"],
+                    )
+                    for item in page.get("Contents", [])
+                    if older_than is None or item["LastModified"] < older_than
+                ]
+                if infos:
+                    objects += len(infos)
+                    yield infos
+        except Exception as exc:  # not BaseException: a consumer that stops early is no error
+            span.record_exception(exc)
+            span.set_status(trace.Status(trace.StatusCode.ERROR, str(exc)))
+            raise
+        finally:
+            span.set_attribute("py_common.s3.pages", pages)
+            span.set_attribute("py_common.s3.objects", objects)
+            span.end()
