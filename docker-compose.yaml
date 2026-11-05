@@ -81,14 +81,18 @@ services:
       SERVICES: s3
     ports: ["4566:4566"]
     healthcheck:
-      # The image ships curl. It checks that s3 reports "available" rather than
+      # The image ships curl. It checks that s3 reports a ready state rather than
       # just that the port answers: the health endpoint responds before the
-      # service has finished coming up.
+      # service has finished coming up. "available" is a fresh container; "running"
+      # is what it becomes once S3 has served a request, so a stack that has been
+      # used (tests, `make infra-up` a second time) reports "running" for good --
+      # matching only "available" left it unhealthy and failed `docker compose up
+      # --wait` on every rerun.
       test:
         - CMD-SHELL
         - >-
           curl -sf http://localhost:4566/_localstack/health
-          | grep -q '"s3": "available"'
+          | grep -qE '"s3": "(available|running)"'
       interval: 3s
       timeout: 5s
       retries: 20
