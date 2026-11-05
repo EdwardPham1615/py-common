@@ -10,6 +10,8 @@ that answers like S3.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
@@ -117,3 +119,52 @@ async def test_explicit_bucket_overrides_the_configured_one(
     assert await storage.get_object_bytes("k", bucket=other) == b"in-other"
     with pytest.raises(ClientError):
         await storage.get_object_bytes("k")  # not in the default bucket
+
+
+async def test_head_object_against_a_real_server(storage: ObjectStorageClient) -> None:
+    """The unit tests feed head_object a ClientError we built ourselves. What the
+    server actually calls a missing key on a bodiless HEAD is the whole question."""
+    await storage.put_object("sized.bin", b"x" * 17, content_type="application/pdf")
+
+    info = await storage.head_object("sized.bin")
+
+    assert info is not None
+    assert (info.size, info.content_type) == (17, "application/pdf")
+    assert info.last_modified.tzinfo is not None
+    assert await storage.head_object("never-written.bin") is None
+
+
+async def test_list_objects_walks_a_prefix_and_filters_by_age(
+    storage: ObjectStorageClient,
+) -> None:
+    for name in ("walk/a", "walk/b", "elsewhere/c"):
+        await storage.put_object(name, b"1")
+
+    keys = {o.key async for page in storage.list_objects("walk/") for o in page}
+    assert keys == {"walk/a", "walk/b"}
+
+    soon = datetime.now(UTC) + timedelta(minutes=5)
+    assert {o.key async for p in storage.list_objects("walk/", older_than=soon) for o in p} == keys
+    # Everything was written a moment ago, so nothing is older than an hour.
+    past = datetime.now(UTC) - timedelta(hours=1)
+    assert [p async for p in storage.list_objects("walk/", older_than=past)] == []
+
+
+async def test_presigned_put_signs_the_content_length(storage: ObjectStorageClient) -> None:
+    """What this library controls is the signature: content-length joins the signed
+    headers, which is what makes AWS S3 refuse an upload of another size.
+
+    It cannot be shown end to end here -- LocalStack accepts a PUT of the wrong
+    length even when it is signed (measured: 10 bytes against a URL signed for 5
+    answers 200). The assertion that matters is therefore on the URL, and the
+    declared size is shown to upload normally."""
+    signed = await storage.get_presigned_url(
+        "capped.txt", method="put_object", expires_in=60, content_length=5
+    )
+    unsigned = await storage.get_presigned_url("loose.txt", method="put_object", expires_in=60)
+
+    assert "content-length" in parse_qs(urlparse(signed).query)["X-Amz-SignedHeaders"][0]
+    assert "content-length" not in parse_qs(urlparse(unsigned).query)["X-Amz-SignedHeaders"][0]
+    async with httpx.AsyncClient(timeout=10) as http:
+        put = await http.put(signed, content=b"12345")
+    assert put.status_code == 200, put.text

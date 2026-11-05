@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from datetime import datetime
 from types import TracebackType
 from typing import Any, BinaryIO, Self
 
@@ -11,7 +14,23 @@ from botocore.exceptions import ClientError
 
 from py_common.config import StorageSettings
 
-__all__ = ["ObjectStorageClient"]
+__all__ = ["ObjectInfo", "ObjectStorageClient"]
+
+# S3-compatible servers disagree on how they say "no such key" for a HEAD, which has
+# no body to carry an error document: AWS answers a bare 404 (code "404"), others
+# send NoSuchKey or NotFound.
+_MISSING_KEY_CODES = frozenset({"404", "NoSuchKey", "NotFound"})
+
+
+@dataclass(frozen=True, slots=True)
+class ObjectInfo:
+    """What a HEAD or a listing says about one object -- never its body."""
+
+    key: str
+    size: int
+    last_modified: datetime
+    # Listings do not carry it; only :meth:`ObjectStorageClient.head_object` fills it in.
+    content_type: str | None = None
 
 
 class ObjectStorageClient:
@@ -113,10 +132,24 @@ class ObjectStorageClient:
         expires_in: int = 3600,
         bucket: str | None = None,
         content_type: str | None = None,
+        content_length: int | None = None,
     ) -> str:
+        """Sign a URL for ``method`` on ``key``.
+
+        ``content_length`` (``put_object`` only) signs the exact byte count, so S3
+        refuses an upload of any other size -- the only way to cap a browser upload,
+        since a presigned PUT otherwise accepts whatever arrives. The caller's HTTP
+        client must then send that same ``Content-Length``. Passing it with another
+        method raises, unlike ``content_type``, which is ignored there: a size limit
+        that silently does nothing is worse than none.
+        """
+        if content_length is not None and method != "put_object":
+            raise ValueError("content_length can only be signed for method='put_object'")
         params: dict[str, Any] = {"Bucket": bucket or self.settings.bucket, "Key": key}
         if content_type and method == "put_object":
             params["ContentType"] = content_type
+        if content_length is not None:
+            params["ContentLength"] = content_length
         url: str = await self.client.generate_presigned_url(
             ClientMethod=method,
             Params=params,
@@ -129,3 +162,53 @@ class ObjectStorageClient:
         async with resp["Body"] as stream:
             data: bytes = await stream.read()
             return data
+
+    async def head_object(self, key: str, *, bucket: str | None = None) -> ObjectInfo | None:
+        """Size and type of ``key`` without downloading it, or ``None`` when it is not there.
+
+        Only a missing key is ``None``; a permission or network error still raises, so
+        "absent" cannot be confused with "could not ask". This is how a service checks
+        what a browser actually uploaded to a presigned URL before trusting it.
+        """
+        try:
+            head = await self.client.head_object(Bucket=bucket or self.settings.bucket, Key=key)
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code", "") in _MISSING_KEY_CODES:
+                return None
+            raise
+        return ObjectInfo(
+            key=key,
+            size=int(head["ContentLength"]),
+            last_modified=head["LastModified"],
+            content_type=head.get("ContentType"),
+        )
+
+    async def list_objects(
+        self,
+        prefix: str = "",
+        *,
+        older_than: datetime | None = None,
+        bucket: str | None = None,
+    ) -> AsyncIterator[list[ObjectInfo]]:
+        """Walk a bucket under ``prefix`` one page at a time (at most 1000 keys each).
+
+        Pages, not a list, because a bucket can be large; a caller that wants a cap
+        applies it to what it *does* with the keys, not to the listing -- capping the
+        listing lets old files still in use crowd the real candidates out of reach.
+
+        ``older_than`` (timezone-aware) keeps only objects last modified before it,
+        and pages left empty by that are skipped rather than yielded.
+        """
+        if older_than is not None and older_than.tzinfo is None:
+            raise ValueError("older_than must be timezone-aware")
+        paginator = self.client.get_paginator("list_objects_v2")
+        async for page in paginator.paginate(Bucket=bucket or self.settings.bucket, Prefix=prefix):
+            infos = [
+                ObjectInfo(
+                    key=str(item["Key"]), size=int(item["Size"]), last_modified=item["LastModified"]
+                )
+                for item in page.get("Contents", [])
+                if older_than is None or item["LastModified"] < older_than
+            ]
+            if infos:
+                yield infos

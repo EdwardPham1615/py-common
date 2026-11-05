@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 from typing import Any, Self
 
 import pytest
 from botocore.exceptions import ClientError
 
 from py_common.config import StorageSettings
-from py_common.storage import ObjectStorageClient
+from py_common.storage import ObjectInfo, ObjectStorageClient
+
+_NOW = datetime(2026, 11, 5, 12, 0, tzinfo=UTC)
 
 
 class _FakeStream:
@@ -32,6 +36,8 @@ class _FakeS3:
     def __init__(self, head_bucket_error: ClientError | None = None) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.head_bucket_error = head_bucket_error
+        self.head_object_error: ClientError | None = None
+        self.pages: list[dict[str, Any]] = []
         self.stream = _FakeStream(b"payload")
 
     async def head_bucket(self, **kwargs: Any) -> None:
@@ -55,6 +61,29 @@ class _FakeS3:
     async def get_object(self, **kwargs: Any) -> dict[str, Any]:
         self.calls.append(("get_object", kwargs))
         return {"Body": self.stream}
+
+    async def head_object(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append(("head_object", kwargs))
+        if self.head_object_error is not None:
+            raise self.head_object_error
+        return {"ContentLength": 42, "ContentType": "image/png", "LastModified": _NOW}
+
+    def get_paginator(self, operation: str) -> _FakePaginator:
+        assert operation == "list_objects_v2"
+        return _FakePaginator(self.pages, self.calls)
+
+
+class _FakePaginator:
+    def __init__(
+        self, pages: list[dict[str, Any]], calls: list[tuple[str, dict[str, Any]]]
+    ) -> None:
+        self._pages = pages
+        self._calls = calls
+
+    async def paginate(self, **kwargs: Any) -> AsyncIterator[dict[str, Any]]:
+        self._calls.append(("paginate", kwargs))
+        for page in self._pages:
+            yield page
 
 
 class _FakeClientCM:
@@ -172,3 +201,106 @@ async def test_get_object_bytes_closes_the_stream() -> None:
     async with storage:
         assert await storage.get_object_bytes("k") == b"payload"
     assert fake.stream.closed
+
+
+# --- head_object, list_objects, content_length ------------------------------
+
+
+async def test_head_object_reports_size_and_type_without_a_body() -> None:
+    fake = _FakeS3()
+    storage, _ = _client(fake)
+    async with storage:
+        info = await storage.head_object("k", bucket="b")
+
+    assert info == ObjectInfo(key="k", size=42, last_modified=_NOW, content_type="image/png")
+    assert fake.calls[0] == ("head_object", {"Bucket": "b", "Key": "k"})
+
+
+@pytest.mark.parametrize("code", ["404", "NoSuchKey", "NotFound"])
+async def test_head_object_returns_none_for_a_missing_key(code: str) -> None:
+    """Servers disagree on the code a bodiless HEAD 404 carries."""
+    fake = _FakeS3()
+    fake.head_object_error = _client_error(code, 404)
+    storage, _ = _client(fake)
+    async with storage:
+        assert await storage.head_object("gone") is None
+
+
+async def test_head_object_does_not_hide_a_failure_as_absence() -> None:
+    """None must mean "not there", never "could not ask" -- a denied HEAD read as
+    missing would let an oversized upload through the size check."""
+    fake = _FakeS3()
+    fake.head_object_error = _client_error("403", 403)
+    storage, _ = _client(fake)
+    async with storage:
+        with pytest.raises(ClientError):
+            await storage.head_object("k")
+
+
+def _page(*items: tuple[str, int, datetime]) -> dict[str, Any]:
+    return {"Contents": [{"Key": k, "Size": n, "LastModified": t} for k, n, t in items]}
+
+
+async def test_list_objects_yields_one_list_per_page() -> None:
+    fake = _FakeS3()
+    fake.pages = [_page(("a", 1, _NOW), ("b", 2, _NOW)), _page(("c", 3, _NOW))]
+    storage, _ = _client(fake)
+    async with storage:
+        pages = [page async for page in storage.list_objects("p/", bucket="b")]
+
+    assert [[o.key for o in page] for page in pages] == [["a", "b"], ["c"]]
+    assert pages[0][1] == ObjectInfo(key="b", size=2, last_modified=_NOW)
+    assert fake.calls[0] == ("paginate", {"Bucket": "b", "Prefix": "p/"})
+
+
+async def test_list_objects_older_than_filters_and_skips_emptied_pages() -> None:
+    fake = _FakeS3()
+    old, new = _NOW - timedelta(days=2), _NOW
+    fake.pages = [
+        _page(("old1", 1, old), ("new1", 1, new)),
+        _page(("new2", 1, new)),
+        _page(("old2", 1, old)),
+    ]
+    storage, _ = _client(fake)
+    async with storage:
+        pages = [p async for p in storage.list_objects(older_than=_NOW - timedelta(days=1))]
+
+    # The middle page had nothing old enough: not yielded as an empty list.
+    assert [[o.key for o in page] for page in pages] == [["old1"], ["old2"]]
+
+
+async def test_list_objects_on_an_empty_bucket_yields_nothing() -> None:
+    fake = _FakeS3()
+    fake.pages = [{}]  # S3 omits "Contents" entirely when nothing matches
+    storage, _ = _client(fake)
+    async with storage:
+        assert [p async for p in storage.list_objects()] == []
+
+
+async def test_list_objects_rejects_a_naive_cutoff() -> None:
+    """A naive datetime compared with S3's aware ones raises TypeError deep in the
+    loop, after the first page has been fetched; say so at the call instead."""
+    storage, _ = _client(_FakeS3())
+    async with storage:
+        with pytest.raises(ValueError, match="timezone-aware"):
+            _ = [p async for p in storage.list_objects(older_than=datetime(2026, 1, 1))]
+
+
+async def test_presigned_put_can_sign_the_content_length() -> None:
+    fake = _FakeS3()
+    storage, _ = _client(fake)
+    async with storage:
+        await storage.get_presigned_url(
+            "k", method="put_object", content_type="image/png", content_length=1234
+        )
+        await storage.get_presigned_url("k", method="put_object")
+
+    assert fake.calls[0][1]["Params"]["ContentLength"] == 1234
+    assert "ContentLength" not in fake.calls[1][1]["Params"]
+
+
+async def test_content_length_on_a_download_url_is_an_error_not_a_noop() -> None:
+    storage, _ = _client(_FakeS3())
+    async with storage:
+        with pytest.raises(ValueError, match="put_object"):
+            await storage.get_presigned_url("k", content_length=10)
