@@ -349,6 +349,11 @@ class OtelSettings(BaseModel):
     exporter_otlp_insecure: bool = True
     traces_sampler_arg: float = 1.0
 
+    # Extra query-parameter names to blank out of exported span URLs, on top of the
+    # built-in credential names (key, token, code, state, X-Amz-Signature, ...). The
+    # built-ins cannot be removed from here.
+    redact_query_params: list[str] = Field(default_factory=list)
+
     # Metrics ride the same OTLP endpoint as traces. Kept separately switchable
     # because sampling traces down is normal, while metrics must stay complete
     # for a rate or error ratio to mean anything.

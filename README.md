@@ -219,6 +219,8 @@ shutdown_tracing()  # flushes buffered spans as the process stops
 
 `instrument=("httpx", "redis")` narrows which client libraries are traced (default: all four; a library that is not installed is skipped, a misspelt name raises). SQLAlchemy takes an engine, so it stays a separate `instrument_sqlalchemy(engine)`.
 
+**Secrets are scrubbed before spans leave the process.** Instrumentors record whatever they are handed, and the httpx and FastAPI ones hand over the whole URL — `?key=…`, `?token=…`, a presigned S3 signature. `setup_tracing` exports through a wrapper that replaces the value of credential-named query parameters (`key`, `token`, `code`, `state`, `password`, `signature`, `X-Amz-Signature`, `X-Amz-Credential`, `X-Amz-Security-Token`; exact names, any case) with `REDACTED`, and blanks `Authorization` / `Cookie` headers if an instrumentor captures them. Add your own names with `OTEL__REDACT_QUERY_PARAMS` (pass `settings.otel.redact_query_params` as `redact_query_params=`). Exception messages and other free text in span events are not touched. Redis spans need no help: the instrumentor already records `SET ? ? ?`, and a test pins that.
+
 **Call `setup_tracing` in the process that does the work, after any fork.** The batch span processor owns a thread, and threads do not survive `fork()`: a provider built in a parent and inherited by a prefork child exports nothing, with no error. A Celery worker calls it from `worker_process_init`, not at import time.
 
 ## Metrics
