@@ -123,7 +123,7 @@ keypair with the issuer and audience the validator already expects.
 
 Each subpackage under `src/py_common/` maps to an optional dependency extra in
 `pyproject.toml` (`http`, `storage`, `security`, `telemetry`, `grpc`,
-`runtime`, `persistence`, `migrations`, `cache`, `profiling`; `all` pulls in
+`runtime`, `persistence`, `migrations`, `cache`, `profiling`, `worker`; `all` pulls in
 everything, `dev` is tooling only). Only `pydantic`/`pydantic-settings`/
 `python-dotenv`/`structlog`/`ecs-logging`/`opentelemetry-api`/`anyio`/
 `tenacity` are always installed. **Import optional-dependency modules only inside the code path
@@ -159,7 +159,8 @@ because it runs under `--extra all`.
 | `cache` | Redis client factory, `Cache`/`@cached` (stampede-protected), distributed lock (auto-extend), fixed/sliding-window rate limiters |
 | `runtime` | FastAPI app shell, lifespan composer, gRPC server + client channel pool (request-id interceptors), uvicorn runner |
 | `persistence` | Engine/sessionmaker, structured query logging, `Base` + naming convention, thin Alembic helpers, `Repository`/`UnitOfWork` |
-| `utils` | `retry_async` (tenacity), `new_nanoid`/`new_uuid7`, `Clock`/`FixedClock`, `AsyncCircuitBreaker` |
+| `utils` | `retry_async` (tenacity), `new_nanoid`/`new_uuid7`/snowflake ids, `Clock`/`FixedClock`, `AsyncCircuitBreaker` |
+| `worker` | Celery app wired to settings, logging and tracing; `async def` tasks on one event loop per process; dead letters; schedule locks |
 | `testing` | `FakeUnitOfWork`, `InMemoryRepository`, JWT test-token factory, `assert_routes_protected` — the doubles and assertions this library ships for *consumers* to test against |
 | `lifecycle` (top-level module) | Process-wide draining flag (`begin_draining`/`is_draining`/`reset_draining`), shared by the HTTP and gRPC layers so both stop accepting traffic together. The only thing `py_common/__init__.py` re-exports besides `__version__`. |
 

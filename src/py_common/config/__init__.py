@@ -13,6 +13,7 @@ from py_common.config.settings import (
     ServerSettings,
     SnowflakeSettings,
     StorageSettings,
+    WorkerSettings,
 )
 
 __all__ = [
@@ -28,6 +29,7 @@ __all__ = [
     "ServerSettings",
     "SnowflakeSettings",
     "StorageSettings",
+    "WorkerSettings",
     "get_environment",
     "resolve_env_files",
 ]
