@@ -15,16 +15,18 @@ storage, HTTP helpers, runtime, persistence, cache, utils) for internal FastAPI
 services, installed by pinning a git tag. It is *not* an application — there is
 no domain logic here.
 
-**Current state: `v0.3.0` shipped 2026-09-28 and no service consumes it yet.**
-That is worth knowing before weighing a breaking change, and worth correcting
-here the moment it stops being true — it is the difference between a rename
-costing one PR and a rename costing somebody an outage. `0.2.0` spent that
-budget on three at once (the package rename, `create_auth_deps` → `Auth`, and
-the Python floor) and `0.3.0` on two more (the `sqlalchemy` ceiling and
-`log.logger`), which was affordable only because the window was still open.
-Once services do pin a tag, a change ships to all of them at once: prefer
-additive changes (new optional parameters, new modules) over breaking ones, and
-see "Governance" in README.md before changing any public signature.
+**Current state: `v0.3.0` shipped 2026-09-28, and services now consume it.**
+thousand-lives, a real service, pins `v0.3.0`; fastapi-sample-project is a
+reference service built on it. That ends the window in which a breaking change
+cost one PR: from here it costs every consumer an upgrade, so each one needs a
+migration note and a reason that survives being read by the person it breaks.
+`0.2.0` spent the free budget on three breaks (the package rename,
+`create_auth_deps` → `Auth`, and the Python floor) and `0.3.0` on two (the
+`sqlalchemy` ceiling and `log.logger`). The 0.4.0 work takes one deliberate break
+— a missing `ENVIRONMENT` is now an error, not `dev` — agreed with the consumers'
+owner before it was made. Keep correcting this paragraph the moment it stops being
+true. Prefer additive changes (new optional parameters, new modules) over breaking
+ones, and see "Governance" in README.md before changing any public signature.
 
 **Requires Python 3.14+.** The floor tracks the current stable release rather
 than the oldest one still getting security fixes. Nothing here needs 3.14; it is
