@@ -354,6 +354,11 @@ class OtelSettings(BaseModel):
     # built-ins cannot be removed from here.
     redact_query_params: list[str] = Field(default_factory=list)
 
+    # Use FastAPI's built-in OpenTelemetry (0.142+) instead of FastAPIInstrumentor.
+    # Read it in two places that must agree: create_base_app(fastapi_native=...) and
+    # setup_telemetry(fastapi_native=...). Older FastAPI falls back to the instrumentor.
+    fastapi_native: bool = False
+
     # Metrics ride the same OTLP endpoint as traces. Kept separately switchable
     # because sampling traces down is normal, while metrics must stay complete
     # for a rate or error ratio to mean anything.

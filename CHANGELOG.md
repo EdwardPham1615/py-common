@@ -85,6 +85,21 @@ versioning follows [Semantic Versioning](https://semver.org/).
   nothing is an answer, not an error, and its span says `py_common.s3.found=false`.
   Costs nothing without a tracer provider.
 
+- `OTEL__FASTAPI_NATIVE` / `fastapi_native=` on `setup_telemetry` and `create_base_app`
+  to use FastAPI's built-in OpenTelemetry (0.142 and later) instead of
+  `FastAPIInstrumentor`. Off by default; on a FastAPI without it the option falls
+  back to the instrumentor and logs `fastapi_native_unavailable`.
+
+  `create_base_app(fastapi_native=True)` builds the app with `telemetry={"metrics":
+  False, "exclude": <probes>}` (`fastapi_native_config()`). Measured on FastAPI
+  0.162: the built-in records `http.server.request.duration` and
+  `http.server.active_requests` — the instruments `MetricsMiddleware` already
+  records — so leaving its metrics on counts every request twice. FastAPI does not
+  double-trace when `FastAPIInstrumentor` is also present (it detects it and steps
+  aside), so the default path is unchanged. `setup_telemetry` warns if it finds a
+  native app whose metrics were left on. A `telemetry=` you pass to
+  `create_base_app` yourself wins.
+
 ### Breaking
 
 - **BREAKING** — a missing `ENVIRONMENT` is now an error instead of `dev`.
