@@ -23,7 +23,7 @@ CASES=(
   "security:py_common.security,py_common.testing.tokens"
   "cache:py_common.cache"
   "storage:py_common.storage"
-  "telemetry:py_common.telemetry"
+  "telemetry:py_common.telemetry,py_common.telemetry.redact"
   "runtime:py_common.runtime"
   "persistence:py_common.persistence"
   "migrations:py_common.persistence.migrations"

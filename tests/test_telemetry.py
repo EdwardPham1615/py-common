@@ -226,6 +226,20 @@ def test_shutdown_tracing_shuts_the_provider_down_and_forgets_it() -> None:
     assert shut == [True]
 
 
+def test_setup_tracing_exports_through_the_redactor(stub_sdk: list[Any]) -> None:
+    """The exporter the batch processor drives is the redacting wrapper, around the
+    real OTLP one. Skip the wrapper and every URL goes out with its query string."""
+    from py_common.telemetry.redact import RedactingSpanExporter
+
+    provider = tel.setup_tracing(service_name="svc", redact_query_params=["session_id"])
+
+    (processor,) = provider._active_span_processor._span_processors  # type: ignore[union-attr]
+    assert isinstance(processor, _FakeProcessor)
+    assert isinstance(processor.exporter, RedactingSpanExporter)
+    assert isinstance(processor.exporter._inner, _FakeExporter)
+    assert processor.exporter.redact_url("?session_id=1") == "?session_id=REDACTED"
+
+
 def test_sampler_ratio_is_applied(stub_sdk: list[Any]) -> None:
     """A service that asked for 5% must not silently export everything."""
     provider = tel.setup_telemetry(

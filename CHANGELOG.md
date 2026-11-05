@@ -54,6 +54,24 @@ versioning follows [Semantic Versioning](https://semver.org/).
   nothing. `instrument=` picks which client libraries to trace; an unknown name
   raises instead of silently tracing less.
 
+- Exported spans no longer carry credentials in their URLs. The httpx and FastAPI
+  instrumentors record the full URL, query string included, as `http.url` (FastAPI's
+  built-in telemetry as `url.query`), so `?key=…`, `?token=…` or a presigned S3
+  signature went to the collector and from there to whatever retains traces.
+  `setup_tracing` now exports through `RedactingSpanExporter`, which replaces the
+  value of `key`, `token`, `code`, `state`, `password`, `signature`, `X-Amz-Signature`,
+  `X-Amz-Credential` and `X-Amz-Security-Token` with `REDACTED` (exact names, any
+  case) and blanks `Authorization` / `Cookie` headers when an instrumentor captures
+  them. New setting `OTEL__REDACT_QUERY_PARAMS` adds names; the built-ins cannot be
+  removed. Pass `settings.otel.redact_query_params` as `redact_query_params=`.
+
+  Only that rewrite, nothing for Redis: `RedisInstrumentor` already records
+  `SET ? ? ?`, which an integration test now pins. Span events (an exception's
+  message) are free text and are not scrubbed.
+
+  The traces you already hold from before this release still contain what they
+  contained.
+
 ### Breaking
 
 - **BREAKING** — a missing `ENVIRONMENT` is now an error instead of `dev`.

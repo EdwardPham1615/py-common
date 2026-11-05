@@ -54,6 +54,7 @@ def setup_tracing(
     environment: str = "dev",
     enabled: bool = True,
     instrument: Sequence[str] = DEFAULT_INSTRUMENT,
+    redact_query_params: Sequence[str] = (),
 ) -> TracerProvider | None:
     """Create the process's ``TracerProvider`` and trace its client libraries.
 
@@ -73,6 +74,11 @@ def setup_tracing(
     built in a parent and inherited by a prefork child exports nothing, silently.
     A Celery worker therefore calls this from ``worker_process_init``, not at import.
     Call :func:`shutdown_tracing` when the process stops so buffered spans flush.
+
+    Secrets are scrubbed from exported spans (see
+    :class:`~py_common.telemetry.redact.RedactingSpanExporter`): credential-named
+    query parameters in URLs, plus any names in ``redact_query_params``, and
+    ``Authorization`` / ``Cookie`` headers if an instrumentor captures them.
     """
     global _provider
     unknown = sorted(set(instrument) - set(_CLIENT_INSTRUMENTORS))
@@ -96,6 +102,8 @@ def setup_tracing(
     from opentelemetry.sdk.trace.export import BatchSpanProcessor
     from opentelemetry.sdk.trace.sampling import ParentBasedTraceIdRatio
 
+    from py_common.telemetry.redact import RedactingSpanExporter
+
     if _provider is None:
         resource = Resource.create(
             {
@@ -107,7 +115,10 @@ def setup_tracing(
             resource=resource,
             sampler=ParentBasedTraceIdRatio(sampler_arg),
         )
-        exporter = OTLPSpanExporter(endpoint=otlp_endpoint, insecure=insecure)
+        # The redactor wraps the exporter: the last point a span can be rewritten.
+        exporter = RedactingSpanExporter(
+            OTLPSpanExporter(endpoint=otlp_endpoint, insecure=insecure), redact_query_params
+        )
         _provider.add_span_processor(BatchSpanProcessor(exporter))
         trace.set_tracer_provider(_provider)
     else:
@@ -132,6 +143,7 @@ def setup_telemetry(
     metrics_enabled: bool = True,
     metrics_export_interval_ms: int = 60_000,
     prometheus_metrics: bool = False,
+    redact_query_params: Sequence[str] = (),
 ) -> TracerProvider | None:
     """Initialize the OTel SDK and instrument FastAPI + common client libraries.
 
@@ -164,6 +176,7 @@ def setup_telemetry(
         insecure=insecure,
         sampler_arg=sampler_arg,
         environment=environment,
+        redact_query_params=redact_query_params,
     )
     _instrument_fastapi(app)
     return provider
