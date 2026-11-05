@@ -205,6 +205,22 @@ Anything passed as a keyword to a log call lands beside these, so keep those nam
 
 `json_logs=False` swaps the renderer for the console one, which builds its prefix from `level`, `timestamp` and `logger` — different names on purpose, because `ConsoleRenderer` knows nothing about ECS and prints whatever keys it is given. Use it in a terminal; do not tie it to the environment, or a local run never shows what production emits.
 
+## Tracing
+
+`setup_telemetry(app, ...)` builds the tracer provider, exports spans over OTLP gRPC, and instruments FastAPI, httpx, Redis, pymongo and Celery. A process with no web app — a Celery worker, a beat scheduler, a script — calls the part that does not need one:
+
+```python
+from py_common.telemetry import setup_tracing, shutdown_tracing
+
+setup_tracing(service_name="orders-worker", otlp_endpoint=settings.otel.exporter_otlp_endpoint)
+...
+shutdown_tracing()  # flushes buffered spans as the process stops
+```
+
+`instrument=("httpx", "redis")` narrows which client libraries are traced (default: all four; a library that is not installed is skipped, a misspelt name raises). SQLAlchemy takes an engine, so it stays a separate `instrument_sqlalchemy(engine)`.
+
+**Call `setup_tracing` in the process that does the work, after any fork.** The batch span processor owns a thread, and threads do not survive `fork()`: a provider built in a parent and inherited by a prefork child exports nothing, with no error. A Celery worker calls it from `worker_process_init`, not at import time.
+
 ## Metrics
 
 `setup_telemetry` installs a `MeterProvider` alongside the tracer and pushes metrics to the same OTLP endpoint. Traces let you debug one request; metrics are what you alert on. Two RED instruments come for free:

@@ -143,3 +143,69 @@ def test_served_requests_carry_the_request_id_on_their_span(
         for tag in span.get("tags", [])
     ]
     assert ("http.request.id", "req-from-test") in tags, json.dumps(tags[:20], indent=2)
+
+
+# --- setup_tracing: a process with no web app at all -------------------------
+
+WORKER_SCRIPT = """
+import sys, threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+import httpx
+from opentelemetry import trace
+
+from py_common.telemetry import setup_tracing, shutdown_tracing
+
+service_name, endpoint = sys.argv[1], sys.argv[2]
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def log_message(self, *args):
+        pass
+
+
+server = HTTPServer(("127.0.0.1", 0), Handler)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+
+setup_tracing(service_name=service_name, otlp_endpoint=endpoint, insecure=True)
+
+with trace.get_tracer("worker").start_as_current_span("job"):
+    httpx.get(f"http://127.0.0.1:{server.server_address[1]}/ping")
+
+shutdown_tracing()
+server.shutdown()
+"""
+
+
+def test_setup_tracing_exports_from_a_process_without_fastapi(
+    otlp_endpoint: str, jaeger_query_url: str
+) -> None:
+    """A worker, a beat scheduler or a script gets the same pipeline a service does.
+
+    Asserts both ends of it: the hand-made span (provider and exporter work with no
+    app at all) and the httpx client span nested under it (the client instrumentors
+    are switched on by setup_tracing, not by an app being instrumented).
+    """
+    service_name = f"py_common-it-{uuid.uuid4().hex[:8]}"
+    result = subprocess.run(  # noqa: S603 - fixed argv, this interpreter, literal script
+        [sys.executable, "-c", WORKER_SCRIPT, service_name, otlp_endpoint],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
+
+    traces = _wait_for_traces(jaeger_query_url, service_name)
+
+    assert traces, f"no traces arrived for {service_name}"
+    spans = [span for trace in traces for span in trace["spans"]]
+    by_name = {span["operationName"]: span for span in spans}
+    assert "job" in by_name
+    client = by_name["GET"]  # the httpx client span
+    parent_ids = {ref["spanID"] for ref in client.get("references", [])}
+    assert by_name["job"]["spanID"] in parent_ids, "the client span is not a child of the job span"
