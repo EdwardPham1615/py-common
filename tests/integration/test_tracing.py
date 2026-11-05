@@ -231,3 +231,62 @@ def test_s3_calls_are_traced_and_the_trace_holds_no_signature_or_key(
     everything = json.dumps(traces)
     assert SECRET not in everything  # the object key
     assert "X-Amz-Signature" not in everything
+
+
+NATIVE_SCRIPT = """
+import sys
+
+from fastapi.testclient import TestClient
+
+from py_common.runtime import create_base_app
+from py_common.telemetry import fastapi_native_supported, setup_telemetry, shutdown_telemetry
+
+service_name, endpoint, secret = sys.argv[1:4]
+assert fastapi_native_supported(), "this FastAPI has no built-in OpenTelemetry"
+
+app = create_base_app(title="t", version="1", fastapi_native=True)
+
+
+@app.get("/cb")
+async def callback() -> dict:
+    return {"ok": True}
+
+
+@app.get("/health/ready")
+async def ready() -> dict:
+    return {"ok": True}
+
+
+setup_telemetry(
+    app, service_name=service_name, otlp_endpoint=endpoint, metrics_enabled=False,
+    fastapi_native=True,
+)
+client = TestClient(app)
+client.get(f"/cb?code={secret}&page=2")
+client.get("/health/ready")
+shutdown_telemetry()
+"""
+
+
+def test_fastapi_native_telemetry_reaches_the_collector_redacted_and_without_probes(
+    otlp_endpoint: str, jaeger_query_url: str
+) -> None:
+    """FastAPI's built-in telemetry through the whole stack: the provider setup_telemetry
+    installs, the exporter wrapper, and the app built by create_base_app.
+
+    The native path records the query as ``url.query`` rather than ``http.url``, so this
+    is also the only place that attribute is checked leaving the process."""
+    from py_common.telemetry import fastapi_native_supported
+
+    if not fastapi_native_supported():
+        pytest.skip("installed FastAPI predates its built-in OpenTelemetry (0.142)")
+    service_name = f"py_common-it-{uuid.uuid4().hex[:8]}"
+    _run(NATIVE_SCRIPT, service_name, otlp_endpoint)
+    traces = _wait_for_traces(jaeger_query_url, service_name)
+
+    assert traces, f"no traces arrived for {service_name}"
+    operations = {span["operationName"] for trace in traces for span in trace["spans"]}
+    assert "GET /cb" in operations, operations
+    assert not any("health" in op for op in operations), operations  # probes excluded
+    assert _tag_values(traces, "url.query") == ["code=REDACTED&page=2"]
+    assert SECRET not in json.dumps(traces)

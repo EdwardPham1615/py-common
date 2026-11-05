@@ -450,3 +450,159 @@ def test_instrument_sqlalchemy_survives_a_failure(monkeypatch: pytest.MonkeyPatc
     tel.instrument_sqlalchemy(SimpleNamespace(sync_engine=object()))  # must not raise
 
     assert logged == ["otel_instrumentation_failed"]
+
+
+# --- FastAPI's built-in OpenTelemetry ------------------------------------------
+
+needs_native = pytest.mark.skipif(
+    not tel.fastapi_native_supported(),
+    reason="installed FastAPI predates its built-in OpenTelemetry (0.142)",
+)
+
+
+def test_native_exclusions_are_the_ones_metricsmiddleware_uses() -> None:
+    """Probes stay out of traces for the same reason they stay out of metrics, and two
+    hand-kept lists drift."""
+    from py_common.http.middleware.metrics import DEFAULT_EXCLUDED_PATHS
+
+    assert tel._UNTRACED_PATHS == DEFAULT_EXCLUDED_PATHS
+
+
+@pytest.mark.parametrize(
+    ("path", "excluded"),
+    [
+        ("/health", True),
+        ("/health/ready", True),
+        ("/live", True),
+        ("/ready", True),
+        ("/metrics", True),
+        ("/healthy", False),  # a prefix match on text would swallow this
+        ("/api/health", False),
+        ("/items/1", False),
+        ("", False),
+    ],
+)
+def test_native_probe_exclusion(path: str, excluded: bool) -> None:
+    assert tel.fastapi_native_config()["exclude"]({"path": path}) is excluded
+
+
+def test_native_config_turns_the_duplicate_metrics_off() -> None:
+    assert tel.fastapi_native_config()["metrics"] is False
+
+
+def test_native_option_skips_the_instrumentor(
+    monkeypatch: pytest.MonkeyPatch, stub_sdk: list[Any]
+) -> None:
+    monkeypatch.setattr(tel, "fastapi_native_supported", lambda: True)
+    instrumented: list[Any] = []
+    monkeypatch.setattr(tel, "_instrument_fastapi", instrumented.append)
+
+    tel.setup_telemetry(_app(), service_name="svc", fastapi_native=True)
+
+    assert instrumented == []
+
+
+def test_the_instrumentor_stays_the_default(
+    monkeypatch: pytest.MonkeyPatch, stub_sdk: list[Any]
+) -> None:
+    instrumented: list[Any] = []
+    monkeypatch.setattr(tel, "_instrument_fastapi", instrumented.append)
+
+    tel.setup_telemetry(_app(), service_name="svc")
+
+    assert len(instrumented) == 1
+
+
+def test_an_older_fastapi_falls_back_to_the_instrumentor_and_says_so(
+    monkeypatch: pytest.MonkeyPatch, stub_sdk: list[Any]
+) -> None:
+    """Asking for native on a FastAPI that has none must not mean no tracing."""
+    monkeypatch.setattr(tel, "fastapi_native_supported", lambda: False)
+    instrumented: list[Any] = []
+    monkeypatch.setattr(tel, "_instrument_fastapi", instrumented.append)
+    warnings: list[str] = []
+    monkeypatch.setattr(tel.logger, "warning", lambda event, **kw: warnings.append(event))
+
+    tel.setup_telemetry(_app(), service_name="svc", fastapi_native=True)
+
+    assert len(instrumented) == 1
+    assert warnings == ["fastapi_native_unavailable"]
+
+
+@needs_native
+def test_native_on_an_app_built_for_something_else_warns_about_duplicate_metrics(
+    monkeypatch: pytest.MonkeyPatch, stub_sdk: list[Any]
+) -> None:
+    warnings: list[str] = []
+    monkeypatch.setattr(tel.logger, "warning", lambda event, **kw: warnings.append(event))
+
+    tel.setup_telemetry(_app(), service_name="svc", fastapi_native=True)  # default FastAPI()
+
+    assert warnings == ["fastapi_native_metrics_enabled"]
+
+
+@needs_native
+def test_create_base_app_configures_native_telemetry_only_when_asked() -> None:
+    from py_common.runtime import create_base_app
+
+    native = create_base_app(title="t", version="1", fastapi_native=True)
+    plain = create_base_app(title="t", version="1")
+
+    assert native._telemetry["metrics"] is False  # type: ignore[attr-defined]
+    assert plain._telemetry["metrics"] is True  # type: ignore[attr-defined]
+
+
+@needs_native
+def test_a_telemetry_config_passed_by_the_caller_wins() -> None:
+    from py_common.runtime import create_base_app
+
+    mine = {"metrics": True}
+    app = create_base_app(title="t", version="1", fastapi_native=True, telemetry=mine)
+
+    assert app._telemetry["metrics"] is True  # type: ignore[attr-defined]
+
+
+@needs_native
+def test_the_native_path_end_to_end_with_a_real_sdk() -> None:
+    """Traces from the built-in telemetry, probes left out, and none of the metrics
+    that would duplicate MetricsMiddleware -- through the real FastAPI and the real SDK."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    spans = InMemorySpanExporter()
+    tracer_provider = TracerProvider()
+    tracer_provider.add_span_processor(SimpleSpanProcessor(spans))
+    reader = InMemoryMetricReader()
+    config = {
+        **tel.fastapi_native_config(),
+        "tracer_provider": tracer_provider,
+        "meter_provider": MeterProvider(metric_readers=[reader]),
+    }
+    app = FastAPI(telemetry=config)  # type: ignore[arg-type]
+
+    @app.get("/items/{n}")
+    def item(n: int) -> dict[str, int]:
+        return {"n": n}
+
+    @app.get("/health/ready")
+    def ready() -> dict[str, bool]:
+        return {"ok": True}
+
+    client = TestClient(app)
+    client.get("/items/1")
+    client.get("/health/ready")
+
+    servers = [s.name for s in spans.get_finished_spans() if s.kind.name == "SERVER"]
+    assert servers == ["GET /items/{n}"]
+    data = reader.get_metrics_data()
+    names = (
+        [m.name for rm in data.resource_metrics for sm in rm.scope_metrics for m in sm.metrics]
+        if data
+        else []
+    )
+    assert names == []

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import inspect
+from collections.abc import MutableMapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from opentelemetry import trace
@@ -26,6 +27,8 @@ _provider: TracerProvider | None = None
 __all__ = [
     "build_metrics_router",
     "enable_profiler",
+    "fastapi_native_config",
+    "fastapi_native_supported",
     "instrument_sqlalchemy",
     "setup_metrics",
     "setup_telemetry",
@@ -43,6 +46,37 @@ _CLIENT_INSTRUMENTORS: dict[str, tuple[str, str]] = {
     "celery": ("opentelemetry.instrumentation.celery", "CeleryInstrumentor"),
 }
 DEFAULT_INSTRUMENT: tuple[str, ...] = tuple(_CLIENT_INSTRUMENTORS)
+
+# The same probe and scrape paths MetricsMiddleware leaves out (a test holds the two
+# together). Spelled out here rather than imported: this package belongs to the
+# `telemetry` extra and must not reach into `py_common.http` for a constant.
+_UNTRACED_PATHS = ("/health", "/live", "/ready", "/metrics")
+
+
+def fastapi_native_supported() -> bool:
+    """Whether the installed FastAPI has its own OpenTelemetry (0.142 and later)."""
+    from fastapi import FastAPI
+
+    return "telemetry" in inspect.signature(FastAPI.__init__).parameters
+
+
+def _is_probe(scope: MutableMapping[str, Any]) -> bool:
+    path = str(scope.get("path", ""))
+    return any(path == p or path.startswith(p + "/") for p in _UNTRACED_PATHS)
+
+
+def fastapi_native_config() -> dict[str, Any]:
+    """The ``FastAPI(telemetry=...)`` value that makes the built-in telemetry fit here.
+
+    Two things differ from FastAPI's defaults. ``metrics`` is off, because the
+    built-in records ``http.server.request.duration`` and
+    ``http.server.active_requests`` -- the same two instruments
+    :class:`~py_common.http.middleware.MetricsMiddleware` records, with different
+    attributes and under another scope, so leaving it on counts every request twice.
+    ``exclude`` keeps probes and the scrape endpoint out of traces, which is what
+    ``excluded_urls`` does for the instrumentor.
+    """
+    return {"metrics": False, "exclude": _is_probe}
 
 
 def setup_tracing(
@@ -144,6 +178,7 @@ def setup_telemetry(
     metrics_export_interval_ms: int = 60_000,
     prometheus_metrics: bool = False,
     redact_query_params: Sequence[str] = (),
+    fastapi_native: bool = False,
 ) -> TracerProvider | None:
     """Initialize the OTel SDK and instrument FastAPI + common client libraries.
 
@@ -157,6 +192,13 @@ def setup_telemetry(
     endpoint — then mount :func:`build_metrics_router`. Processes without a
     FastAPI app (workers, gRPC servers) call :func:`setup_tracing` and
     :func:`~py_common.telemetry.metrics.setup_metrics` directly.
+
+    ``fastapi_native=True`` uses FastAPI's built-in OpenTelemetry (0.142 and later)
+    instead of ``FastAPIInstrumentor``: nothing is instrumented here, FastAPI picks
+    up the global provider this call installs. Create the app with
+    ``create_base_app(..., fastapi_native=True)`` (or ``FastAPI(telemetry=
+    fastapi_native_config())``) so its duplicate metrics are off and probes are
+    excluded. On an older FastAPI it falls back to the instrumentor and says so.
     """
     if not enabled:
         return None
@@ -178,7 +220,16 @@ def setup_telemetry(
         environment=environment,
         redact_query_params=redact_query_params,
     )
-    _instrument_fastapi(app)
+    if fastapi_native and fastapi_native_supported():
+        _check_native_app(app)
+    else:
+        if fastapi_native:
+            logger.warning(
+                "fastapi_native_unavailable",
+                detail="installed FastAPI predates its built-in OpenTelemetry (0.142); "
+                "using FastAPIInstrumentor instead",
+            )
+        _instrument_fastapi(app)
     return provider
 
 
@@ -199,6 +250,22 @@ def shutdown_telemetry() -> None:
     """Flush and shut down the tracer *and* meter providers (call from app shutdown)."""
     shutdown_metrics()
     shutdown_tracing()
+
+
+def _check_native_app(app: FastAPI) -> None:
+    """Warn when the app was not built for native telemetry; do not change it.
+
+    Best effort -- it reads FastAPI's private ``_telemetry`` -- and silent when that
+    is absent. The failure it catches is real and quiet: native metrics left on beside
+    MetricsMiddleware double-count every request.
+    """
+    config = getattr(app, "_telemetry", None)
+    if isinstance(config, dict) and config.get("metrics"):
+        logger.warning(
+            "fastapi_native_metrics_enabled",
+            detail="FastAPI's built-in metrics duplicate MetricsMiddleware; create the app "
+            "with create_base_app(..., fastapi_native=True) or telemetry=fastapi_native_config()",
+        )
 
 
 def _instrument_fastapi(app: FastAPI) -> None:
