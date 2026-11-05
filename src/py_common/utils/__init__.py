@@ -1,4 +1,4 @@
-"""Small shared utilities: retry, IDs, clock, circuit breaker."""
+"""Small shared utilities: retry, IDs (nanoid, UUIDv7, snowflake), clock, circuit breaker."""
 
 from __future__ import annotations
 
@@ -22,6 +22,12 @@ from py_common.utils.ids import (
     new_uuid7,
 )
 from py_common.utils.retry import retry_async, standard_retry
+from py_common.utils.snowflake import (
+    SnowflakeGenerator,
+    configure_snowflake,
+    new_snowflake_id,
+    snowflake_timestamp_ms,
+)
 
 __all__ = [
     "ALPHABET_ALPHA",
@@ -37,10 +43,14 @@ __all__ = [
     "CircuitState",
     "Clock",
     "FixedClock",
+    "SnowflakeGenerator",
     "SystemClock",
+    "configure_snowflake",
     "new_nanoid",
+    "new_snowflake_id",
     "new_uuid7",
     "retry_async",
+    "snowflake_timestamp_ms",
     "standard_retry",
     "utcnow",
 ]

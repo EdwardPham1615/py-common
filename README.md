@@ -881,6 +881,28 @@ class User(Base, UUIDv7PrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
 stmt = select(User).where(User.is_active())
 ```
 
+### Snowflake ids
+
+`bigint` ids that grow with time, for high-volume tables where UUIDs are too wide:
+
+```python
+from py_common.config import SnowflakeSettings
+from py_common.utils import configure_snowflake, new_snowflake_id
+
+configure_snowflake(settings.snowflake.worker_id)  # once, in every entry point
+row_id = new_snowflake_id()
+```
+
+41 bits of milliseconds since 2026-01-01, 10 bits of worker id, 12 of sequence. The
+worker id (`SNOWFLAKE__WORKER_ID`, 0–1023) must be unique per **process** that creates
+ids — the API and each worker process, not each host — and `new_snowflake_id()` raises
+if nothing configured it rather than defaulting to 0, because two processes both on 0
+collide months later as primary-key violations. A clock that steps backwards never
+repeats an id.
+
+**Send them to browsers as strings.** A snowflake is routinely above 2**53, and
+`JSON.parse` rounds it silently.
+
 ## Governance
 
 This library is shared by multiple services, so a change here ships to all of them at once:

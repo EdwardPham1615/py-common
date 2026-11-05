@@ -334,6 +334,14 @@ class KeycloakSettings(BaseModel):
         return f"{self.issuer}/.well-known/openid-configuration"
 
 
+class SnowflakeSettings(BaseModel):
+    """Nested under a service's settings as ``snowflake`` -- env key ``SNOWFLAKE__WORKER_ID``."""
+
+    # Unique per process that creates ids, not per host: two replicas sharing one
+    # will eventually issue the same id in the same millisecond.
+    worker_id: int = Field(default=0, ge=0, le=1023)
+
+
 class OtelSettings(BaseModel):
     enabled: bool = True
     service_name: str = "app"

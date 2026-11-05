@@ -8,6 +8,21 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Snowflake ids in `py_common.utils`: `SnowflakeGenerator`, `configure_snowflake`,
+  `new_snowflake_id`, `snowflake_timestamp_ms`, plus a `SnowflakeSettings` group
+  (`SNOWFLAKE__WORKER_ID`). Moved from the first consumer's own copy, with the same
+  bit layout (41 time / 10 worker / 12 sequence) and the same default epoch
+  (2026-01-01), so ids it has already stored stay valid.
+
+  One deliberate difference: `new_snowflake_id()` raises `RuntimeError` until
+  `configure_snowflake()` has been called, where the copy it came from defaulted to
+  worker 0. Two processes that forgot to configure would share that id and collide.
+
+  Ids above 2**53 must reach JavaScript as strings; the module docstring and README
+  say how.
+
 ### Breaking
 
 - **BREAKING** — a missing `ENVIRONMENT` is now an error instead of `dev`.

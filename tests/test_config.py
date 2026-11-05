@@ -20,6 +20,7 @@ from py_common.config import (
     ProfilerSettings,
     RedisSettings,
     ServerSettings,
+    SnowflakeSettings,
     StorageSettings,
     get_environment,
     resolve_env_files,
@@ -317,6 +318,7 @@ SETTINGS_GROUPS = {
     "PROFILER": ProfilerSettings,
     "HTTP": HttpSettings,
     "SERVER": ServerSettings,
+    "SNOWFLAKE": SnowflakeSettings,
 }
 
 
