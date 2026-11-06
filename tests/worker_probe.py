@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 import billiard
 from worker_probe_app import worker
@@ -18,6 +19,10 @@ def main() -> None:
         worker.celery.worker_main(
             ["worker", "--pool=prefork", "--concurrency=1", "--loglevel=INFO", "--without-gossip"]
         )
+    elif command == "beat":
+        # What `celery beat` runs underneath.
+        schedule = Path(os.environ["PROBE_DIR"]) / "beat-schedule"
+        worker.celery.Beat(loglevel="INFO", schedule=str(schedule)).run()
     elif command == "send":
         worker.celery.send_task("probe.touch")
     elif command == "send-traced":
