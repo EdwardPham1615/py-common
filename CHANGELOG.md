@@ -8,6 +8,8 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-06
+
 ### Changed
 
 - **A `Worker` now configures snowflake ids itself, one per pool process.** When the
