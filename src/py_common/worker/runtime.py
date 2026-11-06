@@ -22,10 +22,18 @@ logger = get_logger(__name__)
 class WorkerHost(Protocol):
     """The part of a service's settings a worker reads. ``BaseAppSettings`` subclasses
     that declare ``worker`` and ``redis`` satisfy it; ``postgres`` and ``otel`` are
-    picked up when present."""
+    picked up when present.
 
-    worker: WorkerSettings
-    redis: RedisSettings
+    Read-only properties, not attributes: a protocol attribute is invariant, so a
+    settings class whose ``worker`` is a *subclass* of :class:`WorkerSettings` (its own
+    timezone default, say) would not satisfy it. A property is covariant, and a
+    pydantic field satisfies one."""
+
+    @property
+    def worker(self) -> WorkerSettings: ...
+
+    @property
+    def redis(self) -> RedisSettings: ...
 
 
 class WorkerRuntime:
@@ -40,7 +48,7 @@ class WorkerRuntime:
     """
 
     def __init__(self, settings: WorkerHost) -> None:
-        self.settings = settings
+        self._settings = settings
         self.loop = asyncio.new_event_loop()
         self.redis: Redis = create_redis(settings.redis)
         self.engine: Any = None
@@ -52,6 +60,12 @@ class WorkerRuntime:
             from py_common.persistence import create_engine_and_sessionmaker
 
             self.engine, self.session_factory = create_engine_and_sessionmaker(postgres)
+
+    @property
+    def settings(self) -> WorkerHost:
+        """The service's settings. A subclass narrows it by redeclaring ``settings:
+        MySettings`` -- a read-only property admits that, a plain attribute would not."""
+        return self._settings
 
     def run[T](self, awaitable: Awaitable[T]) -> T:
         """Run a coroutine to completion on this process's loop."""
