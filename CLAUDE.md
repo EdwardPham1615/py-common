@@ -15,8 +15,9 @@ storage, HTTP helpers, runtime, persistence, cache, utils) for internal FastAPI
 services, installed by pinning a git tag. It is *not* an application — there is
 no domain logic here.
 
-**Current state: `v0.4.0` shipped 2026-11-05, and services now consume it.**
-thousand-lives, a real service, pins `v0.3.0` and moves to `v0.4.0` in its own plan; fastapi-sample-project is a
+**Current state: `v0.4.1` shipped 2026-11-06 (a patch to the `worker` extra on top of
+`v0.4.0`, 2026-11-05), and services now consume it.**
+thousand-lives, a real service, pins `v0.3.0` and moves to `v0.4.1` in its own plan; fastapi-sample-project is a
 reference service built on it. That ends the window in which a breaking change
 cost one PR: from here it costs every consumer an upgrade, so each one needs a
 migration note and a reason that survives being read by the person it breaks.
