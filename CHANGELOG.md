@@ -8,6 +8,25 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **A `Worker` now configures snowflake ids itself, one per pool process.** When the
+  settings declare `snowflake`, every prefork child calls `configure_snowflake` with
+  `snowflake.worker_id` + its index in the pool (0 for the solo pool and eager mode).
+  Before, all children shared one id, so two of them issuing an id in the same
+  millisecond issued the same id and the second insert failed on the primary key.
+
+  What this changes for you: `SNOWFLAKE__WORKER_ID` on a worker is the **first id of a
+  range** as wide as the pool (`--concurrency`, or the `max` of `--autoscale`), so give the
+  API and other workers ids outside it — API 0, worker 1–8, the next worker 9, … A
+  `Runtime` that already calls `configure_snowflake` can drop that call (if it stays, it
+  runs after the worker's and wins). `Worker(..., configure_snowflake=False)` restores the
+  old behaviour. A child whose id would pass 1023 logs `snowflake_worker_id_out_of_range`
+  and cannot make ids.
+
+  Not a break for a service that sets no `snowflake` group. For one that does and runs a
+  pool, the old behaviour was a latent bug.
+
 ### Added
 
 - `Worker(..., beat_service_name=None)`: beat's spans and log lines carry `<app_name>-beat`

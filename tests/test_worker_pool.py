@@ -95,6 +95,49 @@ def _wait_until(condition: Callable[[], bool], seconds: float) -> None:
         time.sleep(0.2)
 
 
+@pytest.mark.parametrize("start_method", ["spawn", "fork"])
+def test_pool_processes_that_make_ids_at_the_same_moment_never_collide(
+    tmp_path: Path, start_method: str
+) -> None:
+    """Every child of a prefork worker took the same snowflake worker id, so two of
+    them issuing an id in the same millisecond issued the *same* id and the second
+    insert failed on the primary key. Three children here each make 300 ids from one
+    wall-clock boundary; each must own one id of the range starting at the base."""
+    base, size = 100, 3
+    env = {
+        **os.environ,
+        "PROBE_DIR": str(tmp_path),
+        "PROBE_START_METHOD": start_method,
+        "PROBE_CONCURRENCY": str(size),
+        "PROBE_SNOWFLAKE_BASE": str(base),
+        "PYTHONPATH": str(TESTS),
+    }
+    env.pop("FORKED_BY_MULTIPROCESSING", None)
+
+    with (tmp_path / "worker.log").open("wb") as log:
+        worker = _probe("worker", env, log.fileno())
+        try:
+            subprocess.run(  # noqa: S603 - fixed argv: this interpreter, our own module
+                [sys.executable, "-m", "worker_probe", "send-ids", str(size)],
+                cwd=TESTS,
+                env=env,
+                timeout=60,
+                check=True,
+            )
+            _wait_until(lambda: len(list(tmp_path.glob("ids-*.json"))) == size, 60)
+        finally:
+            _stop(worker)
+
+    files = sorted(tmp_path.glob("ids-*.json"))
+    assert len(files) == size, (tmp_path / "worker.log").read_text()[-2500:]
+    per_process = [json.loads(path.read_text()) for path in files]
+    every_id = [i for ids in per_process for i in ids]
+    assert len(set(every_id)) == len(every_id) == size * 300, "two processes issued the same id"
+    machine_ids = [{(i >> 12) & 1023 for i in ids} for ids in per_process]
+    assert all(len(own) == 1 for own in machine_ids)
+    assert {next(iter(own)) for own in machine_ids} == set(range(base, base + size))
+
+
 def test_beat_logs_under_its_own_service_name(tmp_path: Path) -> None:
     """Celery configures logging before it announces beat, so a line is only named
     ``-beat`` once beat_init has run; beat's schedule is due every second, and the line

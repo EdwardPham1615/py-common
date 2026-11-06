@@ -8,9 +8,13 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any
 
 import structlog
+from billiard import current_process
 from celery import Celery, signals
 
 from py_common.logging import get_logger, setup_logging
+from py_common.utils import snowflake as _snowflake_module
+from py_common.utils.snowflake import MAX_WORKER_ID
+from py_common.utils.snowflake import configure_snowflake as _configure_snowflake
 from py_common.worker.deadletter import dead_letter_entry
 from py_common.worker.runtime import WorkerHost, WorkerRuntime, scheduled_lock
 
@@ -50,6 +54,14 @@ class Worker:
       own; the lazy path in :meth:`runtime` covers the solo pool and eager mode, which
       never fire that signal. Beat names itself ``<app_name>-beat`` (``beat_service_name``)
       in traces and logs, the pool ``<app_name>-worker``.
+    * A snowflake worker id of its own in every pool process, when the settings declare
+      ``snowflake``: ``snowflake.worker_id`` **plus the process's index in the pool**
+      (0 for the solo pool and eager mode). ``SNOWFLAKE__WORKER_ID`` is therefore the
+      first id of a *range* as wide as the pool -- ``--concurrency``, or the ``max`` of
+      ``--autoscale`` -- and the API and other workers must keep out of it. billiard hands
+      a replacement process the lowest free index, so a recycled child reuses its
+      predecessor's id and two live processes never share one. ``configure_snowflake=False``
+      leaves it to the service.
     * Late acknowledgement, so a task running in a killed worker goes back on the
       queue. **Every task must therefore be safe to run twice.**
     """
@@ -65,6 +77,7 @@ class Worker:
         beat_schedule: Mapping[str, Any] | None = None,
         json_logs: bool = True,
         beat_service_name: str | None = None,
+        configure_snowflake: bool = True,
         **conf: Any,
     ) -> None:
         # setdefault: an operator's explicit value wins. Must precede creating the app.
@@ -77,6 +90,10 @@ class Worker:
         self._traced = False
         self._beat = False
         self._beat_service_name = beat_service_name
+        self._snowflake_base: int | None = None
+        if configure_snowflake and (snowflake := getattr(settings, "snowflake", None)):
+            self._snowflake_base = snowflake.worker_id
+        self._ids_configured = False
 
         worker = settings.worker
         self.celery = Celery(name, broker=worker.broker_url, include=list(include))
@@ -108,6 +125,8 @@ class Worker:
         """
         if self._runtime is None:
             self._ensure_tracing()
+            # Before the factory: a Runtime that configures ids itself still wins.
+            self._ensure_snowflake()
             self._runtime = self._runtime_factory(self.settings)
         return self._runtime
 
@@ -136,6 +155,29 @@ class Worker:
             environment=self._environment(),
             redact_query_params=otel.redact_query_params,
         )
+
+    def _ensure_snowflake(self) -> None:
+        """Give this process its own id range member: base + its index in the pool."""
+        if self._snowflake_base is None or self._ids_configured:
+            return
+        # The main process (solo pool, eager mode) has no index: it is the only process.
+        index = int(getattr(current_process(), "index", 0))
+        worker_id = self._snowflake_base + index
+        if worker_id > MAX_WORKER_ID:
+            message = (
+                f"snowflake worker id {self._snowflake_base} + pool process index {index} = "
+                f"{worker_id} is above {MAX_WORKER_ID}; lower SNOWFLAKE__WORKER_ID or the "
+                "pool size"
+            )
+            logger.error("snowflake_worker_id_out_of_range", base=self._snowflake_base, index=index)
+            # Celery logs an exception from worker_process_init and carries on, so the
+            # raise alone would leave this child running with whatever generator it
+            # inherited from the parent -- an id shared with a sibling. With none set,
+            # the first id it tries to make fails instead.
+            _snowflake_module._default = None
+            raise RuntimeError(message)
+        _configure_snowflake(worker_id)
+        self._ids_configured = True
 
     def _service_name(self) -> str:
         app = getattr(self.settings, "app_name", self.name)
@@ -221,6 +263,7 @@ class Worker:
         connect(signals.setup_logging, self._on_setup_logging, "logging")
         connect(signals.worker_process_init, self._on_process_init, "process_init")
         connect(signals.beat_init, self._on_beat_init, "beat_init")
+        connect(signals.celeryd_after_setup, self._on_after_setup, "after_setup")
         connect(signals.worker_process_shutdown, self._on_process_shutdown, "process_shutdown")
         connect(signals.task_prerun, self._on_task_prerun, "prerun")
         connect(signals.task_postrun, self._on_task_postrun, "postrun")
@@ -243,6 +286,7 @@ class Worker:
 
     def _on_process_init(self, **_: Any) -> None:
         self._ensure_tracing()
+        self._ensure_snowflake()
 
     def _on_beat_init(self, **_: Any) -> None:
         # Celery configures logging before it announces beat, with no hint that this
@@ -250,6 +294,28 @@ class Worker:
         self._beat = True
         self._configure_logging()
         self._ensure_tracing()
+
+    def _on_after_setup(self, instance: Any = None, **_: Any) -> None:
+        """Warn at start-up when the pool cannot fit under the id limit.
+
+        Only a warning: Celery logs an exception raised from a signal and carries on, so
+        raising here would not stop the worker. The child that is
+        actually out of range logs and fails in :meth:`_ensure_snowflake`, and every id it
+        then tries to make raises.
+        """
+        if self._snowflake_base is None or instance is None:
+            return
+        autoscale = getattr(instance, "autoscale", None)
+        width = int(autoscale[0] if autoscale else instance.concurrency)
+        last = self._snowflake_base + width - 1
+        if last > MAX_WORKER_ID:
+            logger.error(
+                "snowflake_worker_id_range_too_wide",
+                base=self._snowflake_base,
+                pool_size=width,
+                last=last,
+                limit=MAX_WORKER_ID,
+            )
 
     def _on_process_shutdown(self, **_: Any) -> None:
         self._close()

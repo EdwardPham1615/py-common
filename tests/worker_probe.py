@@ -17,12 +17,21 @@ def main() -> None:
         # Fork is Linux's default and has traps of its own.
         billiard.set_start_method(os.environ.get("PROBE_START_METHOD", "spawn"), force=True)
         worker.celery.worker_main(
-            ["worker", "--pool=prefork", "--concurrency=1", "--loglevel=INFO", "--without-gossip"]
+            [
+                "worker",
+                "--pool=prefork",
+                f"--concurrency={os.environ.get('PROBE_CONCURRENCY', '1')}",
+                "--loglevel=INFO",
+                "--without-gossip",
+            ]
         )
     elif command == "beat":
         # What `celery beat` runs underneath.
         schedule = Path(os.environ["PROBE_DIR"]) / "beat-schedule"
         worker.celery.Beat(loglevel="INFO", schedule=str(schedule)).run()
+    elif command == "send-ids":
+        for _ in range(int(sys.argv[2])):
+            worker.celery.send_task("probe.ids", args=[int(sys.argv[2])])
     elif command == "send":
         worker.celery.send_task("probe.touch")
     elif command == "send-traced":
