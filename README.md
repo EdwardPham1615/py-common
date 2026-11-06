@@ -268,7 +268,7 @@ async def sync(runtime: Runtime, order_id: str) -> None:
         ...
 ```
 
-`settings` declares `worker: WorkerSettings` (`WORKER__BROKER_URL`, `WORKER__MAX_RETRIES`, …) and `redis: RedisSettings`; a `postgres: DatabaseSettings` gives the runtime an engine, and an `otel: OtelSettings` switches tracing on. Start it with `celery -A orders.app:worker.celery worker`, and `beat` with the same `-A`.
+`settings` declares `worker: WorkerSettings` (`WORKER__BROKER_URL`, `WORKER__MAX_RETRIES`, …; a subclass is fine, for a different default timezone say) and `redis: RedisSettings`; a `postgres: DatabaseSettings` gives the runtime an engine, and an `otel: OtelSettings` switches tracing on. Start it with `celery -A orders.app:worker.celery worker`, and `beat` with the same `-A`.
 
 **Every task must be safe to run twice.** Acknowledgement is late, so a task running in a killed worker goes back on the queue. The cheap way to get there is to pass an *id* and re-read current state, not to pass data.
 

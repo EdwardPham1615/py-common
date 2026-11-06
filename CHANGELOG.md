@@ -8,6 +8,14 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `WorkerHost` declares `worker` and `redis` as read-only properties, and
+  `WorkerRuntime.settings` is one too, so a settings class whose `worker` is a *subclass* of
+  `WorkerSettings` passes `mypy --strict` (`Worker(...)`, `WorkerRuntime.__init__`) and a
+  `WorkerRuntime` subclass can redeclare `settings: MySettings`, each without a
+  `# type: ignore`.
+
 ## [0.4.0] - 2026-11-05
 
 ### Added
