@@ -35,6 +35,8 @@ worker = Worker(
     "probe",
     Settings(_env_file=None),
     include=["worker_probe_app"],
+    # Beat's schedule, for the test that reads beat's logs: due every second.
+    beat_schedule={"tick": {"task": "probe.touch", "schedule": 1.0}},
     broker_transport_options={
         "data_folder_in": str(PROBE_DIR / "broker"),
         "data_folder_out": str(PROBE_DIR / "broker"),

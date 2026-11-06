@@ -427,3 +427,53 @@ def test_kombu_and_redis_py_agree_about_disconnect() -> None:
     )
 
     assert kombu_takes_keywords or not redis_passes_error
+
+
+# -- beat has a name of its own ---------------------------------------------------------
+
+
+def _traced_settings() -> _Settings:
+    return _Settings(_env_file=None, worker=WorkerSettings(eager=True), otel=OtelSettings())
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [({}, "app-beat"), ({"beat_service_name": "scheduler"}, "scheduler")],
+)
+def test_beat_traces_under_its_own_service_name(
+    monkeypatch: pytest.MonkeyPatch, make_worker: Any, kwargs: dict[str, str], expected: str
+) -> None:
+    started: list[dict[str, Any]] = []
+    monkeypatch.setattr("py_common.telemetry.setup_tracing", lambda **kw: started.append(kw))
+    make_worker("beat-trace", settings=_traced_settings(), **kwargs)
+
+    signals.beat_init.send(sender=None)
+
+    assert [kw["service_name"] for kw in started] == [expected]
+
+
+def test_beat_logs_under_its_own_service_name_once_it_knows_it_is_beat(
+    monkeypatch: pytest.MonkeyPatch, make_worker: Any
+) -> None:
+    """Celery sets logging up before it announces beat, so the first call carries the
+    worker's name and beat_init corrects it."""
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(worker_module, "setup_logging", lambda **kw: calls.append(kw))
+    make_worker("beat-logs")
+
+    signals.setup_logging.send(sender=None)
+    signals.beat_init.send(sender=None)
+
+    assert [kw["service_name"] for kw in calls] == ["app-worker", "app-beat"]
+
+
+def test_a_pool_process_keeps_the_worker_name_after_beat_is_configured_elsewhere(
+    monkeypatch: pytest.MonkeyPatch, make_worker: Any
+) -> None:
+    started: list[dict[str, Any]] = []
+    monkeypatch.setattr("py_common.telemetry.setup_tracing", lambda **kw: started.append(kw))
+    make_worker("child-trace", settings=_traced_settings())
+
+    signals.worker_process_init.send(sender=None)
+
+    assert [kw["service_name"] for kw in started] == ["app-worker"]

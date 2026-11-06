@@ -8,6 +8,11 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `Worker(..., beat_service_name=None)`: beat's spans and log lines carry `<app_name>-beat`
+  instead of the pool's `<app_name>-worker`.
+
 ### Fixed
 
 - `WorkerHost` declares `worker` and `redis` as read-only properties, and

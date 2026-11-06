@@ -279,6 +279,7 @@ What `Worker` does so you do not have to find out in production:
 - **Logging is this library's,** installed through Celery's `setup_logging` signal in the main process and every child. That signal also stops Celery redirecting a child's `sys.stdout`, which swallowed every record after the first task. Task name, id and retry count ride on each line as `task.name`, `task.id`, `task.retries`.
 - **Tracing starts in each child** (`worker_process_init`) and in beat, and flushes as the process stops. A task's span is a child of the span that sent it.
 - **A task that runs out of retries is dead-lettered** to a Redis list (`WORKER__DEAD_LETTER_KEY`): name, args, error, time. `list_dead_letters(redis, key)` reads it; `requeue_dead_letters(worker.celery, redis, key)` sends them again.
+- **Beat has a name of its own.** Spans and log lines from beat carry `service.name` `<app_name>-beat` (`Worker(..., beat_service_name=...)` to change it), the pool's `<app_name>-worker`. Celery sets logging up before it announces beat, so the first few lines (the banner, `beat: Starting...`) still carry the worker name.
 
 **If you create snowflake ids in a worker, give each process its own worker id.** A prefork pool runs several processes from one settings object, so `SNOWFLAKE__WORKER_ID` alone would hand them all the same id. Derive it in your `Runtime` (base id × concurrency + child index) before calling `configure_snowflake`.
 

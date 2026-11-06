@@ -48,7 +48,8 @@ class Worker:
     * Tracing started in each child (``worker_process_init``) and in beat
       (``beat_init``). Under spawn a child inherits no provider, so it has to start its
       own; the lazy path in :meth:`runtime` covers the solo pool and eager mode, which
-      never fire that signal.
+      never fire that signal. Beat names itself ``<app_name>-beat`` (``beat_service_name``)
+      in traces and logs, the pool ``<app_name>-worker``.
     * Late acknowledgement, so a task running in a killed worker goes back on the
       queue. **Every task must therefore be safe to run twice.**
     """
@@ -63,6 +64,7 @@ class Worker:
         task_routes: Mapping[str, Any] | None = None,
         beat_schedule: Mapping[str, Any] | None = None,
         json_logs: bool = True,
+        beat_service_name: str | None = None,
         **conf: Any,
     ) -> None:
         # setdefault: an operator's explicit value wins. Must precede creating the app.
@@ -73,6 +75,8 @@ class Worker:
         self._json_logs = json_logs
         self._runtime: WorkerRuntime | None = None
         self._traced = False
+        self._beat = False
+        self._beat_service_name = beat_service_name
 
         worker = settings.worker
         self.celery = Celery(name, broker=worker.broker_url, include=list(include))
@@ -134,7 +138,10 @@ class Worker:
         )
 
     def _service_name(self) -> str:
-        return f"{getattr(self.settings, 'app_name', self.name)}-worker"
+        app = getattr(self.settings, "app_name", self.name)
+        if self._beat:
+            return self._beat_service_name or f"{app}-beat"
+        return f"{app}-worker"
 
     def _environment(self) -> str:
         environment = getattr(self.settings, "environment", None)
@@ -213,7 +220,7 @@ class Worker:
 
         connect(signals.setup_logging, self._on_setup_logging, "logging")
         connect(signals.worker_process_init, self._on_process_init, "process_init")
-        connect(signals.beat_init, self._on_process_init, "beat_init")
+        connect(signals.beat_init, self._on_beat_init, "beat_init")
         connect(signals.worker_process_shutdown, self._on_process_shutdown, "process_shutdown")
         connect(signals.task_prerun, self._on_task_prerun, "prerun")
         connect(signals.task_postrun, self._on_task_postrun, "postrun")
@@ -224,6 +231,9 @@ class Worker:
 
     def _on_setup_logging(self, **_: Any) -> None:
         # Connecting to this signal is what stops Celery configuring logging itself.
+        self._configure_logging()
+
+    def _configure_logging(self) -> None:
         setup_logging(
             level=str(getattr(self.settings, "log_level", "INFO")),
             service_name=self._service_name(),
@@ -232,6 +242,13 @@ class Worker:
         )
 
     def _on_process_init(self, **_: Any) -> None:
+        self._ensure_tracing()
+
+    def _on_beat_init(self, **_: Any) -> None:
+        # Celery configures logging before it announces beat, with no hint that this
+        # process is beat, so the logger is set up again now that the name is known.
+        self._beat = True
+        self._configure_logging()
         self._ensure_tracing()
 
     def _on_process_shutdown(self, **_: Any) -> None:

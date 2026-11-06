@@ -25,6 +25,7 @@ import re
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -78,3 +79,41 @@ def test_a_real_pool_child_runs_the_task_and_logs_it_as_ecs(
     assert succeeded, f"Celery's lines are not ECS JSON:\n{output[-2500:]}"
     assert "ecs.version" in succeeded[0]
     assert succeeded[0]["service"]["name"] == "app-worker"
+
+
+def _stop(process: subprocess.Popen[bytes]) -> None:
+    process.terminate()
+    try:
+        process.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        process.kill()
+
+
+def _wait_until(condition: Callable[[], bool], seconds: float) -> None:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline and not condition():
+        time.sleep(0.2)
+
+
+def test_beat_logs_under_its_own_service_name(tmp_path: Path) -> None:
+    """Celery configures logging before it announces beat, so a line is only named
+    ``-beat`` once beat_init has run; beat's schedule is due every second, and the line
+    it logs for a due task comes after."""
+    env = {**os.environ, "PROBE_DIR": str(tmp_path), "PYTHONPATH": str(TESTS)}
+    log_path = tmp_path / "beat.log"
+
+    with log_path.open("wb") as log:
+        beat = _probe("beat", env, log.fileno())
+        try:
+            _wait_until(lambda: "Sending due task" in log_path.read_text(), 45)
+        finally:
+            _stop(beat)
+
+    output = log_path.read_text()
+    due = [
+        json.loads(line)
+        for line in output.splitlines()
+        if line.startswith("{") and "Sending due task" in line
+    ]
+    assert due, f"beat never logged a due task as ECS JSON:\n{output[-2500:]}"
+    assert due[0]["service"]["name"] == "app-beat"
