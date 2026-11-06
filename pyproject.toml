@@ -194,6 +194,7 @@ module = [
     "grpc.*",
     "fastapi_profiler.*",
     "celery.*",
+    "billiard.*",
 ]
 ignore_missing_imports = true
 

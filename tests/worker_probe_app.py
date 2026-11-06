@@ -6,10 +6,19 @@ interpreter, finds the task by importing it -- the situation a real service is i
 
 from __future__ import annotations
 
+import json
 import os
+import time
 from pathlib import Path
 
-from py_common.config import BaseAppSettings, OtelSettings, RedisSettings, WorkerSettings
+from py_common.config import (
+    BaseAppSettings,
+    OtelSettings,
+    RedisSettings,
+    SnowflakeSettings,
+    WorkerSettings,
+)
+from py_common.utils import new_snowflake_id
 from py_common.worker import Worker, WorkerRuntime
 
 PROBE_DIR = Path(os.environ["PROBE_DIR"])
@@ -23,6 +32,10 @@ class Settings(BaseAppSettings):
     # Declared because the runtime wants it; the probe task never touches Redis, and
     # building the client connects to nothing.
     redis: RedisSettings = RedisSettings()
+    # The first id of the range the pool's processes share out.
+    snowflake: SnowflakeSettings = SnowflakeSettings(
+        worker_id=int(os.getenv("PROBE_SNOWFLAKE_BASE", "100"))
+    )
     # Tracing only when a test points the probe at a collector.
     otel: OtelSettings = OtelSettings(
         enabled=bool(os.getenv("PROBE_OTLP")),
@@ -56,3 +69,28 @@ async def touch(runtime: WorkerRuntime) -> None:
 
     setup_logging(service_name="app-worker")
     (PROBE_DIR / "flag").write_text("ran")
+
+
+def _meet_and_make_ids(expected: int) -> None:
+    """Blocking on purpose: the point is to hold this process until the others are here."""
+    (PROBE_DIR / f"here-{os.getpid()}").write_text("")
+    deadline = time.monotonic() + 30
+    while len(list(PROBE_DIR.glob("here-*"))) < expected and time.monotonic() < deadline:
+        time.sleep(0.02)
+    boundary = (time.time_ns() // 200_000_000 + 1) * 200_000_000
+    while time.time_ns() < boundary:
+        pass
+    made = [new_snowflake_id() for _ in range(300)]
+    (PROBE_DIR / f"ids-{os.getpid()}.json").write_text(json.dumps(made))
+
+
+@worker.task("probe.ids")
+async def ids(runtime: WorkerRuntime, expected: int) -> None:
+    """Make ids in the same millisecond as the other ``expected`` tasks.
+
+    Each task waits until ``expected`` tasks are running at once -- which, with one task
+    per pool process, means every process -- then all of them wait for the same wall-clock
+    boundary and issue ids back to back. Processes that share a worker id would then
+    produce identical ids; processes with their own never do.
+    """
+    _meet_and_make_ids(expected)

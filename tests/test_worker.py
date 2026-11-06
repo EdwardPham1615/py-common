@@ -20,7 +20,14 @@ from fakeredis import FakeAsyncRedis
 
 import py_common.worker.worker as worker_module
 from py_common.cache.lock import LOCK_KEY_PREFIX
-from py_common.config import BaseAppSettings, OtelSettings, RedisSettings, WorkerSettings
+from py_common.config import (
+    BaseAppSettings,
+    OtelSettings,
+    RedisSettings,
+    SnowflakeSettings,
+    WorkerSettings,
+)
+from py_common.utils import new_snowflake_id, snowflake
 from py_common.worker import (
     Worker,
     WorkerRuntime,
@@ -33,6 +40,7 @@ from py_common.worker import (
 _SIGNALS = (
     ("logging", signals.setup_logging),
     ("process_init", signals.worker_process_init),
+    ("after_setup", signals.celeryd_after_setup),
     ("beat_init", signals.beat_init),
     ("process_shutdown", signals.worker_process_shutdown),
     ("prerun", signals.task_prerun),
@@ -477,3 +485,157 @@ def test_a_pool_process_keeps_the_worker_name_after_beat_is_configured_elsewhere
     signals.worker_process_init.send(sender=None)
 
     assert [kw["service_name"] for kw in started] == ["app-worker"]
+
+
+# -- every pool process gets its own snowflake worker id --------------------------------
+
+
+class _SnowflakeSettings(_Settings):
+    snowflake: SnowflakeSettings = SnowflakeSettings(worker_id=40)
+
+
+class _Child:
+    """What billiard's current_process() is inside a pool child."""
+
+    def __init__(self, index: int) -> None:
+        self.index = index
+
+
+@pytest.fixture
+def clean_snowflake() -> Iterator[None]:
+    saved = snowflake._default
+    snowflake._default = None
+    yield
+    snowflake._default = saved
+
+
+def _worker_bits(snowflake_id: int) -> int:
+    return (snowflake_id >> snowflake.SEQUENCE_BITS) & snowflake.MAX_WORKER_ID
+
+
+def _snowflake_settings(base: int = 40) -> _SnowflakeSettings:
+    return _SnowflakeSettings(
+        _env_file=None,
+        worker=WorkerSettings(eager=True),
+        snowflake=SnowflakeSettings(worker_id=base),
+    )
+
+
+@pytest.mark.usefixtures("clean_snowflake")
+@pytest.mark.parametrize("index", [0, 1, 7])
+def test_a_pool_child_takes_the_base_id_plus_its_index(
+    monkeypatch: pytest.MonkeyPatch, make_worker: Any, index: int
+) -> None:
+    monkeypatch.setattr(worker_module, "current_process", lambda: _Child(index))
+    make_worker("ids-child", settings=_snowflake_settings(40))
+
+    signals.worker_process_init.send(sender=None)
+
+    assert _worker_bits(new_snowflake_id()) == 40 + index
+
+
+@pytest.mark.usefixtures("clean_snowflake")
+def test_the_solo_pool_and_eager_mode_take_the_base_id(make_worker: Any) -> None:
+    """No worker_process_init there: the first runtime does it, and the main process
+    has no pool index."""
+    worker = make_worker("ids-solo", settings=_snowflake_settings(40))
+
+    worker.runtime()
+
+    assert _worker_bits(new_snowflake_id()) == 40
+
+
+@pytest.mark.usefixtures("clean_snowflake")
+def test_a_child_is_configured_once_whichever_path_reaches_it_first(
+    monkeypatch: pytest.MonkeyPatch, make_worker: Any
+) -> None:
+    index = [2]
+    monkeypatch.setattr(worker_module, "current_process", lambda: _Child(index[0]))
+    worker = make_worker("ids-once", settings=_snowflake_settings(40))
+
+    signals.worker_process_init.send(sender=None)
+    index[0] = 5  # would change the id if the lazy path configured it again
+    worker.runtime()
+
+    assert _worker_bits(new_snowflake_id()) == 42
+
+
+@pytest.mark.usefixtures("clean_snowflake")
+def test_a_service_that_configures_ids_in_its_runtime_still_wins(make_worker: Any) -> None:
+    class Own(_FakeRuntime):
+        def __init__(self, settings: Any) -> None:
+            snowflake.configure_snowflake(900)
+            super().__init__(settings)
+
+    make_worker("ids-own", settings=_snowflake_settings(40), runtime_factory=Own).runtime()
+
+    assert _worker_bits(new_snowflake_id()) == 900
+
+
+@pytest.mark.usefixtures("clean_snowflake")
+def test_a_child_whose_id_would_pass_the_limit_cannot_make_ids(
+    monkeypatch: pytest.MonkeyPatch, make_worker: Any
+) -> None:
+    """Celery logs an exception from worker_process_init and carries on, so raising is
+    not enough: the child must not keep an id it inherited from the parent either."""
+    monkeypatch.setattr(worker_module, "current_process", lambda: _Child(5))
+    worker = make_worker("ids-over", settings=_snowflake_settings(1020))
+    snowflake.configure_snowflake(1020)  # what a fork child inherits from its parent
+
+    with structlog.testing.capture_logs() as logs, pytest.raises(RuntimeError, match="1025"):
+        worker._ensure_snowflake()
+
+    assert logs[0]["event"] == "snowflake_worker_id_out_of_range"
+    with pytest.raises(RuntimeError, match="never called"):
+        new_snowflake_id()
+
+
+@pytest.mark.usefixtures("clean_snowflake")
+def test_the_last_id_in_range_is_allowed(monkeypatch: pytest.MonkeyPatch, make_worker: Any) -> None:
+    monkeypatch.setattr(worker_module, "current_process", lambda: _Child(3))
+    make_worker("ids-edge", settings=_snowflake_settings(1020))
+
+    signals.worker_process_init.send(sender=None)
+
+    assert _worker_bits(new_snowflake_id()) == 1023
+
+
+@pytest.mark.usefixtures("clean_snowflake")
+def test_ids_are_left_alone_when_asked_or_when_settings_have_no_snowflake(
+    make_worker: Any,
+) -> None:
+    make_worker("ids-off", settings=_snowflake_settings(), configure_snowflake=False).runtime()
+    with pytest.raises(RuntimeError, match="never called"):
+        new_snowflake_id()
+
+    make_worker("ids-none").runtime()  # settings declare no `snowflake`
+    with pytest.raises(RuntimeError, match="never called"):
+        new_snowflake_id()
+
+
+class _Instance:
+    def __init__(self, concurrency: int, autoscale: list[int] | None = None) -> None:
+        self.concurrency = concurrency
+        self.autoscale = autoscale
+
+
+@pytest.mark.parametrize(
+    ("instance", "too_wide"),
+    [
+        (_Instance(8), False),  # 1016..1023
+        (_Instance(9), True),
+        (_Instance(8, autoscale=[16, 2]), True),  # the range is as wide as `max`
+        (_Instance(64, autoscale=[4, 1]), False),  # concurrency is the CPU count there
+    ],
+)
+def test_the_parent_warns_when_the_pool_does_not_fit_under_the_limit(
+    make_worker: Any, instance: _Instance, too_wide: bool
+) -> None:
+    make_worker("ids-warn", settings=_snowflake_settings(1016))
+
+    with structlog.testing.capture_logs() as logs:
+        signals.celeryd_after_setup.send(sender="w@host", instance=instance, conf=None)
+
+    assert [log["event"] for log in logs] == (
+        ["snowflake_worker_id_range_too_wide"] if too_wide else []
+    )

@@ -279,9 +279,23 @@ What `Worker` does so you do not have to find out in production:
 - **Logging is this library's,** installed through Celery's `setup_logging` signal in the main process and every child. That signal also stops Celery redirecting a child's `sys.stdout`, which swallowed every record after the first task. Task name, id and retry count ride on each line as `task.name`, `task.id`, `task.retries`.
 - **Tracing starts in each child** (`worker_process_init`) and in beat, and flushes as the process stops. A task's span is a child of the span that sent it.
 - **A task that runs out of retries is dead-lettered** to a Redis list (`WORKER__DEAD_LETTER_KEY`): name, args, error, time. `list_dead_letters(redis, key)` reads it; `requeue_dead_letters(worker.celery, redis, key)` sends them again.
-- **Beat has a name of its own.** Spans and log lines from beat carry `service.name` `<app_name>-beat` (`Worker(..., beat_service_name=...)` to change it), the pool's `<app_name>-worker`. Celery sets logging up before it announces beat, so the first few lines (the banner, `beat: Starting...`) still carry the worker name.
 
-**If you create snowflake ids in a worker, give each process its own worker id.** A prefork pool runs several processes from one settings object, so `SNOWFLAKE__WORKER_ID` alone would hand them all the same id. Derive it in your `Runtime` (base id × concurrency + child index) before calling `configure_snowflake`.
+- **Beat has a name of its own.** Spans and log lines from beat carry `service.name` `<app_name>-beat` (`Worker(..., beat_service_name=...)` to change it), the pool's `<app_name>-worker`. Celery sets logging up before it announces beat, so the first few lines (the banner, `beat: Starting...`) still carry the worker name.
+- **Every pool process gets its own snowflake worker id,** when `settings` declares `snowflake` (below).
+
+### Snowflake ids in a worker
+
+A prefork pool runs several processes from one settings object, so one `SNOWFLAKE__WORKER_ID` for all of them would hand every process the same id, and two issuing an id in the same millisecond issue the *same* id. `Worker` therefore calls `configure_snowflake` in each pool process with **`snowflake.worker_id` + the process's index in the pool** (0, 1, … ; the solo pool and eager mode are 0). `SNOWFLAKE__WORKER_ID` of a worker is the first id of a **range** as wide as the pool — `--concurrency`, or the `max` of `--autoscale` — and the API and any other worker must keep out of it:
+
+| Process | `SNOWFLAKE__WORKER_ID` | Ids used |
+|---|---|---|
+| API | 0 | 0 |
+| worker, `--concurrency=8` | 1 | 1 … 8 |
+| second worker, `--concurrency=4` | 9 | 9 … 12 |
+
+billiard gives a replacement process the lowest free index, so a recycled child (`--max-tasks-per-child`) takes over its predecessor's id and two live processes never share one. Nothing here checks that two *services* stay out of each other's range; that is yours to lay out. If `base + index` would pass 1023, the child logs `snowflake_worker_id_out_of_range` and cannot make ids at all (Celery logs an exception from a start-up signal and carries on, so the child stays up but its first `new_snowflake_id()` raises); the main process logs `snowflake_worker_id_range_too_wide` at start-up when it can see the pool will not fit.
+
+If your `Runtime` already calls `configure_snowflake`, **remove that call**, or leave it: it runs after `Worker`'s and wins. Pass `Worker(..., configure_snowflake=False)` to make the worker leave ids alone entirely.
 
 kombu 5.7.0 is the floor because earlier releases died on the first lost Redis connection when paired with redis-py 7+ (`disconnect() got an unexpected keyword argument 'error'`); it also admits redis < 9, so the cache extra's redis no longer has to be held back for Celery.
 
